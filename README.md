@@ -24,7 +24,6 @@ local-llm/
 │   └── config-1m.json              # 확장 프로필 (1M 컨텍스트, YaRN)
 ├── llm-chat.sh                     # 프로필 전환 + 채팅 실행
 ├── llm-server.sh                   # 프로필 전환 + API 서버 실행
-├── llm-profile.sh                  # 컨텍스트 프로필 전환
 ├── README.md                       # (이 파일)
 └── local-llm-guide-2026.md         # 모델 비교 가이드 문서
 
@@ -207,10 +206,8 @@ config.json을 교체하는 방식으로 전환.
 ./llm-chat.sh 1m       # 1M 전환 후 채팅 시작
 ./llm-chat.sh 262k     # 262K 전환 후 채팅 시작
 
-# 방법 2: llm-profile.sh로 전환만 (서버 등 다른 모드 사용 시)
-./llm-profile.sh 1m       # 전환
-./llm-profile.sh 262k     # 복귀
-./llm-profile.sh status   # 현재 상태 확인
+# 현재 프로필 확인
+./llm-chat.sh status
 ```
 
 ### 프로필 비교
@@ -327,7 +324,6 @@ alias llm-chat='/path/to/local-llm/llm-chat.sh'
 alias llm-gen='/path/to/local-llm/.venv/bin/mlx_lm.generate --model mlx-community/Qwen3.5-35B-A3B-4bit'
 alias llm-server='/path/to/local-llm/llm-server.sh'
 alias llm-bench='/path/to/local-llm/.venv/bin/mlx_lm.benchmark --model mlx-community/Qwen3.5-35B-A3B-4bit'
-alias llm-profile='/path/to/local-llm/llm-profile.sh'
 ```
 
 설정 후:
@@ -340,7 +336,7 @@ llm-chat 1m              # 1M 컨텍스트 채팅
 llm-chat 1m --temp 0.3   # 1M + 낮은 temperature
 llm-gen --prompt "Hello" --max-tokens 100
 llm-server               # API 서버 시작
-llm-profile status       # 프로필 확인
+llm-chat status          # 프로필 확인
 ```
 
 ---

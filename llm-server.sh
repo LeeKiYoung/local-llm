@@ -10,20 +10,42 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$SCRIPT_DIR/.venv/bin"
 MODEL="mlx-community/Qwen3.5-35B-A3B-4bit"
+PROFILE_DIR="$SCRIPT_DIR/profiles"
+MODEL_CONFIG="$HOME/.cache/huggingface/hub/models--mlx-community--Qwen3.5-35B-A3B-4bit/snapshots/1e20fd8d42056f870933bf98ca6211024744f7ec/config.json"
 PORT=8080
 
-# 프로필 전환
+switch_profile() {
+  case "$1" in
+    262k)
+      cp "$PROFILE_DIR/config-262k.json" "$MODEL_CONFIG"
+      echo "✅ 262K 컨텍스트 (기본) 적용"
+      ;;
+    1m)
+      cp "$PROFILE_DIR/config-1m.json" "$MODEL_CONFIG"
+      echo "✅ 1M 컨텍스트 (YaRN) 적용"
+      ;;
+  esac
+}
+
+show_status() {
+  if grep -q '"rope_type": "yarn"' "$MODEL_CONFIG" 2>/dev/null; then
+    echo "📍 현재: 1M 컨텍스트 (YaRN 활성)"
+  else
+    echo "📍 현재: 262K 컨텍스트 (기본)"
+  fi
+}
+
 case "$1" in
   1m|long)
-    "$SCRIPT_DIR/llm-profile.sh" 1m
+    switch_profile 1m
     shift
     ;;
   262k|default)
-    "$SCRIPT_DIR/llm-profile.sh" 262k
+    switch_profile 262k
     shift
     ;;
   *)
-    "$SCRIPT_DIR/llm-profile.sh" status
+    show_status
     ;;
 esac
 
