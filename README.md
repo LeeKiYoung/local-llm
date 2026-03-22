@@ -1,8 +1,49 @@
 # Local LLM — Qwen3.5-35B-A3B (MLX)
 
-> 환경: Apple M5 Pro / 64GB / macOS
-> 모델: Qwen3.5-35B-A3B-4bit (MLX 네이티브)
-> 셋업일: 2026-03-22
+Apple Silicon Mac에서 Qwen3.5-35B-A3B를 MLX로 돌리기 위한 셋업 가이드.
+
+## 요구사항
+
+| 항목 | 최소 | 권장 |
+|------|------|------|
+| Mac | Apple Silicon (M1+) | M3 Pro / M4 Pro 이상 |
+| 메모리 | 24GB | 64GB |
+| Python | 3.10+ | 3.11+ |
+| 디스크 | 20GB 여유 | 40GB+ |
+
+## 설치
+
+```bash
+git clone https://github.com/LeeKiYoung/local-llm.git
+cd local-llm
+./setup.sh
+```
+
+`setup.sh`가 자동으로:
+1. Apple Silicon 확인
+2. Python 버전 확인
+3. 가상환경 생성 + mlx-lm 설치
+4. 모델 다운로드 (~19GB)
+
+### 환경만 셋업 (모델 나중에)
+
+```bash
+./setup.sh --no-model
+```
+
+### 모델 캐시 경로 변경 (외장 SSD 등)
+
+```bash
+# ~/.zshrc에 추가
+export HF_HOME=/Volumes/MySSD/.huggingface
+
+# 그 후 셋업
+./setup.sh
+```
+
+기본 경로: `~/.cache/huggingface/hub/` (macOS/Linux 공통)
+
+---
 
 ## 프로젝트 구조
 
@@ -22,6 +63,7 @@ local-llm/
 ├── profiles/
 │   ├── config-262k.json            # 기본 프로필 (262K 컨텍스트)
 │   └── config-1m.json              # 확장 프로필 (1M 컨텍스트, YaRN)
+├── setup.sh                        # 자동 셋업 스크립트
 ├── llm-chat.sh                     # 프로필 전환 + 채팅 실행
 ├── llm-server.sh                   # 프로필 전환 + API 서버 실행
 ├── README.md                       # (이 파일)
@@ -48,14 +90,21 @@ local-llm/
 
 ## 빠른 시작 (Quick Start)
 
-### 1단계: 채팅 시작
+### 1단계: 셋업
 
 ```bash
-cd /path/to/local-llm
+git clone https://github.com/LeeKiYoung/local-llm.git
+cd local-llm
+./setup.sh
+```
+
+### 2단계: 채팅 시작
+
+```bash
 ./llm-chat.sh
 ```
 
-### 2단계: 대화하기
+### 3단계: 대화하기
 
 ```
 📍 현재: 262K 컨텍스트 (기본)
@@ -76,7 +125,7 @@ def fibonacci(n):
 >> (Ctrl+C로 종료)
 ```
 
-### 3단계: 긴 문서 분석이 필요할 때
+### 4단계: 긴 문서 분석이 필요할 때
 
 ```bash
 ./llm-chat.sh 1m
@@ -90,7 +139,7 @@ def fibonacci(n):
 >> (긴 코드나 문서를 붙여넣고 질문)
 ```
 
-### 4단계: 다시 평소 모드로
+### 5단계: 다시 평소 모드로
 
 ```bash
 ./llm-chat.sh          # 또는 ./llm-chat.sh 262k
