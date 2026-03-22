@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$SCRIPT_DIR/.venv/bin"
 MODEL="mlx-community/Qwen3.5-35B-A3B-4bit"
 PROFILE_DIR="$SCRIPT_DIR/profiles"
-MODEL_CONFIG="$HOME/.cache/huggingface/hub/models--mlx-community--Qwen3.5-35B-A3B-4bit/snapshots/1e20fd8d42056f870933bf98ca6211024744f7ec/config.json"
+MODEL_CONFIG=$(find "$HOME/.cache/huggingface/hub/models--mlx-community--Qwen3.5-35B-A3B-4bit/snapshots" -maxdepth 2 -name "config.json" 2>/dev/null | head -1)
 
 switch_profile() {
   case "$1" in
