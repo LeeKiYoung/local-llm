@@ -77,19 +77,27 @@ if [ "$1" != "--no-model" ]; then
 
   echo "  현재 메모리: ${TOTAL_GB}GB — 아래에서 적합한 모델을 선택하세요."
   echo ""
-  echo "  [1] Qwen3.5-35B-A3B-4bit     (~20GB, 103 tok/s)  ⭐ 추천"
-  echo "      한국어+코딩+비전 올라운더. 24GB 이상 권장."
+  echo "  ┌─────┬──────────────────────────┬────────┬───────────┬────────┬──────────────────────────────┐"
+  echo "  │  #  │ 모델                     │ 메모리 │ 속도      │ 최소   │ 특징                         │"
+  echo "  ├─────┼──────────────────────────┼────────┼───────────┼────────┼──────────────────────────────┤"
+  echo "  │  1  │ Qwen3.5-35B-A3B    ⭐    │ ~20GB  │ 103 tok/s │ 24GB+  │ 한국어+코딩+비전 올라운더     │"
+  echo "  │  2  │ Qwen3.5-9B               │ ~6GB   │ 40+ tok/s │ 16GB+  │ 가볍고 빠름                   │"
+  echo "  │  3  │ Qwen3.5-27B              │ ~17GB  │ 15  tok/s │ 24GB+  │ Dense, 코딩 벤치마크 최강     │"
+  echo "  │  4  │ Qwen3-Coder-Next-80B     │ ~15GB  │ 25+ tok/s │ 24GB+  │ 코딩 에이전트 특화            │"
+  echo "  │  5  │ 직접 입력                │ -      │ -         │ -      │ Hugging Face 모델 ID         │"
+  echo "  └─────┴──────────────────────────┴────────┴───────────┴────────┴──────────────────────────────┘"
   echo ""
-  echo "  [2] Qwen3.5-9B-4bit          (~6GB, 40+ tok/s)"
-  echo "      가볍고 빠름. 16GB에서도 쾌적."
-  echo ""
-  echo "  [3] Qwen3.5-27B-4bit         (~17GB, 15 tok/s)"
-  echo "      Dense 모델. 코딩 벤치마크 최강. 24GB 이상 권장."
-  echo ""
-  echo "  [4] Qwen3-Coder-Next-4bit    (~15GB, 25+ tok/s)"
-  echo "      코딩 에이전트 특화. 24GB 이상 권장."
-  echo ""
-  echo "  [5] 직접 입력 (Hugging Face 모델 ID)"
+
+  # 메모리 기반 추천 표시
+  if [ "$TOTAL_GB" -lt 16 ]; then
+    echo "  💡 ${TOTAL_GB}GB 메모리 — [2] Qwen3.5-9B를 권장합니다."
+  elif [ "$TOTAL_GB" -lt 24 ]; then
+    echo "  💡 ${TOTAL_GB}GB 메모리 — [2] Qwen3.5-9B를 권장합니다."
+  elif [ "$TOTAL_GB" -lt 48 ]; then
+    echo "  💡 ${TOTAL_GB}GB 메모리 — [1] Qwen3.5-35B-A3B를 권장합니다."
+  else
+    echo "  💡 ${TOTAL_GB}GB 메모리 — 모든 모델 실행 가능! [1] 추천."
+  fi
   echo ""
 
   read -p "  선택 [1-5] (기본: 1): " MODEL_CHOICE
