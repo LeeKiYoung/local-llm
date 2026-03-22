@@ -31,17 +31,28 @@ cd local-llm
 ./setup.sh --no-model
 ```
 
-### 모델 캐시 경로 변경 (외장 SSD 등)
+### 모델은 어디에 저장되나요?
+
+첫 실행 시 모델(~19GB)이 자동 다운로드되며, 기본적으로 아래 경로에 저장됩니다:
+
+```
+~/.cache/huggingface/hub/    (macOS/Linux 공통)
+```
+
+이 경로를 바꾸고 싶다면 (예: 내장 디스크 용량이 부족해서 외장 SSD에 저장하고 싶은 경우):
 
 ```bash
 # ~/.zshrc에 추가
 export HF_HOME=/Volumes/MySSD/.huggingface
 
-# 그 후 셋업
+# 터미널 재시작 후 셋업
+source ~/.zshrc
 ./setup.sh
 ```
 
-기본 경로: `~/.cache/huggingface/hub/` (macOS/Linux 공통)
+`HF_HOME`은 Hugging Face에서 제공하는 공식 환경변수로,
+모델/토크나이저 등 모든 캐시 파일의 저장 위치를 지정합니다.
+설정하지 않으면 기본 경로(`~/.cache/huggingface`)를 사용합니다.
 
 ---
 
