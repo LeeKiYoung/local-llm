@@ -20,10 +20,22 @@ cd local-llm
 ```
 
 `setup.sh`가 자동으로:
-1. Apple Silicon 확인
-2. Python 버전 확인
+1. Apple Silicon / Python / 메모리 확인
+2. 메모리에 맞는 모델 선택 메뉴 표시
 3. 가상환경 생성 + mlx-lm 설치
-4. 모델 다운로드 (~19GB)
+4. 선택한 모델 다운로드 + 스크립트에 자동 반영
+
+```
+  [1] Qwen3.5-35B-A3B-4bit     (~20GB, 103 tok/s)  ⭐ 추천
+  [2] Qwen3.5-9B-4bit          (~6GB, 40+ tok/s)
+  [3] Qwen3.5-27B-4bit         (~17GB, 15 tok/s)
+  [4] Qwen3-Coder-Next-4bit    (~15GB, 25+ tok/s)
+  [5] 직접 입력 (Hugging Face 모델 ID)
+
+  선택 [1-5] (기본: 1):
+```
+
+Enter만 누르면 추천 모델(Qwen3.5-35B-A3B)로 설치됩니다.
 
 ### 환경만 셋업 (모델 나중에)
 
