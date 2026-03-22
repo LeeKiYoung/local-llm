@@ -1,5 +1,9 @@
 # Local LLM — Qwen3.5-35B-A3B (MLX)
 
+> **Apple Silicon Mac 전용** (M1/M2/M3/M4/M5)
+> MLX는 Apple의 네이티브 ML 프레임워크로, Apple Silicon에서만 동작합니다.
+> NVIDIA GPU / Intel Mac / Windows / Linux는 지원하지 않습니다.
+
 Apple Silicon Mac에서 Qwen3.5-35B-A3B를 MLX로 돌리기 위한 셋업 가이드.
 
 ## 요구사항
