@@ -2,21 +2,20 @@
 # Local LLM 자동 셋업 스크립트
 #
 # 사용법:
-#   ./setup.sh              # 전체 셋업 (venv + mlx-lm + 모델 다운로드)
+#   ./setup.sh              # 대화형 모델 선택 + 셋업
 #   ./setup.sh --no-model   # 모델 다운로드 없이 환경만 셋업
 #
 # 요구사항:
 #   - Apple Silicon Mac (M1/M2/M3/M4/M5)
 #   - Python 3.10+
-#   - ~20GB 디스크 여유 (모델 다운로드)
+#   - 디스크 여유 (모델 크기에 따라 다름)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-MODEL="mlx-community/Qwen3.5-35B-A3B-4bit"
 
 echo "============================================"
-echo "  Local LLM Setup — Qwen3.5-35B-A3B (MLX)"
+echo "  Local LLM Setup (MLX)"
 echo "============================================"
 echo ""
 
@@ -53,12 +52,86 @@ echo "✅ Python $VER ($PYTHON)"
 TOTAL_MEM=$(sysctl -n hw.memsize 2>/dev/null)
 TOTAL_GB=$((TOTAL_MEM / 1073741824))
 echo "✅ 메모리 ${TOTAL_GB}GB"
+echo ""
 
-if [ "$TOTAL_GB" -lt 16 ]; then
-  echo "⚠️  16GB 이상 권장. 현재 ${TOTAL_GB}GB로 모델 실행이 어려울 수 있습니다."
+# 4. 모델 선택
+if [ "$1" != "--no-model" ]; then
+  echo "--------------------------------------------"
+  echo "  모델 선택"
+  echo "--------------------------------------------"
+  echo ""
+
+  if [ "$TOTAL_GB" -ge 64 ]; then
+    MEM_TAG="64GB+"
+  elif [ "$TOTAL_GB" -ge 48 ]; then
+    MEM_TAG="48GB"
+  elif [ "$TOTAL_GB" -ge 32 ]; then
+    MEM_TAG="32GB"
+  elif [ "$TOTAL_GB" -ge 24 ]; then
+    MEM_TAG="24GB"
+  elif [ "$TOTAL_GB" -ge 16 ]; then
+    MEM_TAG="16GB"
+  else
+    MEM_TAG="8GB"
+  fi
+
+  echo "  현재 메모리: ${TOTAL_GB}GB — 아래에서 적합한 모델을 선택하세요."
+  echo ""
+  echo "  [1] Qwen3.5-35B-A3B-4bit     (~20GB, 103 tok/s)  ⭐ 추천"
+  echo "      한국어+코딩+비전 올라운더. 24GB 이상 권장."
+  echo ""
+  echo "  [2] Qwen3.5-9B-4bit          (~6GB, 40+ tok/s)"
+  echo "      가볍고 빠름. 16GB에서도 쾌적."
+  echo ""
+  echo "  [3] Qwen3.5-27B-4bit         (~17GB, 15 tok/s)"
+  echo "      Dense 모델. 코딩 벤치마크 최강. 24GB 이상 권장."
+  echo ""
+  echo "  [4] Qwen3-Coder-Next-4bit    (~15GB, 25+ tok/s)"
+  echo "      코딩 에이전트 특화. 24GB 이상 권장."
+  echo ""
+  echo "  [5] 직접 입력 (Hugging Face 모델 ID)"
+  echo ""
+
+  read -p "  선택 [1-5] (기본: 1): " MODEL_CHOICE
+  MODEL_CHOICE=${MODEL_CHOICE:-1}
+
+  case "$MODEL_CHOICE" in
+    1)
+      MODEL="mlx-community/Qwen3.5-35B-A3B-4bit"
+      MODEL_NAME="Qwen3.5-35B-A3B-4bit"
+      MODEL_SIZE="~19GB"
+      ;;
+    2)
+      MODEL="mlx-community/Qwen3.5-9B-4bit"
+      MODEL_NAME="Qwen3.5-9B-4bit"
+      MODEL_SIZE="~6GB"
+      ;;
+    3)
+      MODEL="mlx-community/Qwen3.5-27B-4bit"
+      MODEL_NAME="Qwen3.5-27B-4bit"
+      MODEL_SIZE="~17GB"
+      ;;
+    4)
+      MODEL="mlx-community/Qwen3-Coder-Next-80B-A3B-4bit"
+      MODEL_NAME="Qwen3-Coder-Next-4bit"
+      MODEL_SIZE="~15GB"
+      ;;
+    5)
+      read -p "  Hugging Face 모델 ID: " MODEL
+      MODEL_NAME="$MODEL"
+      MODEL_SIZE="알 수 없음"
+      ;;
+    *)
+      echo "❌ 잘못된 선택입니다."
+      exit 1
+      ;;
+  esac
+
+  echo ""
+  echo "  선택: $MODEL_NAME ($MODEL_SIZE)"
 fi
 
-# 4. venv 생성
+# 5. venv 생성
 echo ""
 if [ -d "$SCRIPT_DIR/.venv" ]; then
   echo "📦 기존 가상환경 발견 — 건너뜀"
@@ -68,14 +141,14 @@ else
   echo "✅ 가상환경 생성 완료"
 fi
 
-# 5. mlx-lm 설치
+# 6. mlx-lm 설치
 echo ""
 echo "📦 mlx-lm 설치 중..."
 "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
 "$SCRIPT_DIR/.venv/bin/pip" install mlx-lm -q
 echo "✅ mlx-lm 설치 완료"
 
-# 6. HuggingFace 캐시 경로 안내
+# 7. HuggingFace 캐시 경로 안내
 HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
 echo ""
 echo "📂 모델 캐시 경로: $HF_CACHE"
@@ -86,14 +159,25 @@ else
   echo "   예: export HF_HOME=/Volumes/외장SSD/.huggingface"
 fi
 
-# 7. 모델 다운로드
+# 8. 선택한 모델을 스크립트에 반영
+save_model_config() {
+  # llm-chat.sh와 llm-server.sh의 MODEL 변수를 업데이트
+  for script in "$SCRIPT_DIR/llm-chat.sh" "$SCRIPT_DIR/llm-server.sh"; do
+    if [ -f "$script" ]; then
+      sed -i '' "s|^MODEL=.*|MODEL=\"$MODEL\"|" "$script"
+    fi
+  done
+}
+
+# 9. 모델 다운로드
 if [ "$1" = "--no-model" ]; then
   echo ""
   echo "⏭️  모델 다운로드 건너뜀 (--no-model)"
   echo "   나중에 다운로드: ./llm-chat.sh (첫 실행 시 자동 다운로드)"
 else
+  save_model_config
   echo ""
-  echo "📥 모델 다운로드 중... (~19GB, 시간이 걸릴 수 있습니다)"
+  echo "📥 모델 다운로드 중... ($MODEL_SIZE, 시간이 걸릴 수 있습니다)"
   "$SCRIPT_DIR/.venv/bin/mlx_lm.generate" \
     --model "$MODEL" \
     --prompt "Hello" \
@@ -101,10 +185,10 @@ else
   echo "✅ 모델 다운로드 완료"
 fi
 
-# 8. 완료
+# 10. 완료
 echo ""
 echo "============================================"
-echo "  셋업 완료!"
+echo "  셋업 완료! — $MODEL_NAME"
 echo "============================================"
 echo ""
 echo "  채팅 시작:    ./llm-chat.sh"
