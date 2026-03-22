@@ -561,3 +561,9 @@ llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B
 - [mlx-community/Qwen3.5-35B-A3B-4bit](https://huggingface.co/mlx-community/Qwen3.5-35B-A3B-4bit)
 - [Qwen3.5 공식 GitHub](https://github.com/QwenLM/Qwen3.5)
 - [Unsloth GGUF Benchmarks](https://unsloth.ai/docs/models/qwen3.5/gguf-benchmarks)
+
+---
+
+## License
+
+[MIT License](LICENSE)
