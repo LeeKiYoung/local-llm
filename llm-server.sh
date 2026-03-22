@@ -66,6 +66,7 @@ echo "   네트워크: http://$LOCAL_IP:$PORT"
 echo ""
 echo "   엔드포인트: /v1/chat/completions"
 echo "   종료: Ctrl+C"
+echo "   💤 화면이 꺼져도 서버는 유지됩니다 (caffeinate)"
 echo ""
 echo "   테스트:"
 echo "   curl http://$LOCAL_IP:$PORT/v1/chat/completions \\"
@@ -73,4 +74,6 @@ echo "     -H 'Content-Type: application/json' \\"
 echo "     -d '{\"messages\":[{\"role\":\"user\",\"content\":\"안녕!\"}],\"max_tokens\":200}'"
 echo ""
 
-"$VENV/mlx_lm.server" --model "$MODEL" --host 0.0.0.0 --port "$PORT" "$@"
+# caffeinate -di: 시스템 잠자기 방지 (화면은 꺼져도 됨)
+# 서버 프로세스가 끝나면 caffeinate도 자동 종료
+exec caffeinate -di "$VENV/mlx_lm.server" --model "$MODEL" --host 0.0.0.0 --port "$PORT" "$@"
