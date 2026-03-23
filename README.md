@@ -267,7 +267,59 @@ brew install tailscale
 curl http://<TAILSCALE_IP>:8080/v1/chat/completions ...
 ```
 
-### 4. 벤치마크 (mlx_lm.benchmark)
+### 4. 로깅
+
+서버 실행 시 기본적으로 **요청/응답 로깅이 활성화**됩니다.
+
+```bash
+./llm-server.sh          # 로깅 ON (기본)
+./llm-server.sh --no-log  # 로깅 OFF
+```
+
+로그는 `logs/` 폴더에 일별 JSONL 파일로 저장:
+
+```
+logs/
+├── 2026-03-23.jsonl
+├── 2026-03-24.jsonl
+└── ...
+```
+
+각 로그 항목에 포함되는 정보:
+
+| 항목 | 내용 |
+|------|------|
+| timestamp | 요청 시각 |
+| ip | 호출한 기기 IP |
+| duration_ms | 응답 시간 (ms) |
+| messages | 전체 프롬프트 |
+| content_preview | 응답 미리보기 (200자) |
+| usage | 토큰 사용량 (prompt / completion / total) |
+
+로그 분석 예시:
+
+```bash
+# 오늘 로그 보기
+cat logs/$(date +%Y-%m-%d).jsonl | python3 -m json.tool
+
+# IP별 호출 횟수
+cat logs/*.jsonl | jq -r '.ip' | sort | uniq -c | sort -rn
+
+# 느린 요청 찾기 (3초 이상)
+cat logs/*.jsonl | jq 'select(.duration_ms > 3000)'
+```
+
+#### 구조
+
+로깅은 프록시 방식으로 동작합니다:
+
+```
+클라이언트(:8080) → 로깅 프록시 → mlx_lm.server(:8081)
+```
+
+로깅 OFF(`--no-log`) 시 프록시 없이 직접 연결됩니다.
+
+### 5. 벤치마크 (mlx_lm.benchmark)
 
 ```bash
 source .venv/bin/activate
