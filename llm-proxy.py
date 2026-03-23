@@ -99,6 +99,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 reasoning = msg.get("reasoning", "")
         except Exception:
             resp_data = {}
+            choices = []
             content = ""
             reasoning = ""
 
