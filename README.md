@@ -640,6 +640,29 @@ llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B
 
 ---
 
+## 테스트
+
+```bash
+.venv/bin/python test_proxy.py
+```
+
+로깅 프록시의 안정성을 검증하는 21개 테스트:
+
+| # | 테스트 케이스 | 검증 내용 |
+|:-:|-------------|---------|
+| 1 | 정상 요청/응답 | 상태코드, choices, content, usage |
+| 2 | choices가 빈 응답 | 빈 배열 처리 |
+| 3 | choices 키 없는 응답 | 키 누락 처리 |
+| 4 | malformed 응답 | JSON 아닌 응답 처리 |
+| 5 | enable_thinking 파라미터 | Thinking OFF 전달 |
+| 6 | 긴 프롬프트 (500자) | 200자 미리보기 truncate |
+| 7 | GET 요청 | models 엔드포인트 프록시 |
+| 8 | 로그 파일 | 생성, 형식, 필수 필드 검증 |
+
+mock 백엔드 서버로 실행되므로 실제 모델 로딩 없이 테스트 가능.
+
+---
+
 ## 참고 링크
 
 - [MLX-LM GitHub](https://github.com/ml-explore/mlx-examples/tree/main/llms)
