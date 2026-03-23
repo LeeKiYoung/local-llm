@@ -256,6 +256,17 @@ Continue, Open WebUI 등에서 OpenAI endpoint로 연결:
 - URL: `http://<YOUR_LOCAL_IP>:8080/v1`
 - API Key: 아무 값 (인증 없음)
 
+#### 외부 네트워크에서 접속 (Tailscale)
+
+[Tailscale](https://tailscale.com)을 사용하면 외부 네트워크(카페, 회사 등)에서도 LLM 서버에 접속할 수 있습니다.
+포트포워딩 없이 VPN 기반으로 안전하게 연결됩니다.
+
+```bash
+brew install tailscale
+# 양쪽 기기에서 Tailscale 로그인 후
+curl http://<TAILSCALE_IP>:8080/v1/chat/completions ...
+```
+
 ### 4. 벤치마크 (mlx_lm.benchmark)
 
 ```bash
