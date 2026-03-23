@@ -89,19 +89,19 @@ class ProxyHandler(BaseHTTPRequestHandler):
         duration_ms = int((time.time() - start) * 1000)
 
         # 응답 파싱
+        resp_data = {}
+        choices = []
+        content = ""
+        reasoning = ""
         try:
             resp_data = json.loads(resp_body)
-            content = ""
             choices = resp_data.get("choices", [])
             if choices:
                 msg = choices[0].get("message", {})
                 content = msg.get("content", "")
                 reasoning = msg.get("reasoning", "")
         except Exception:
-            resp_data = {}
-            choices = []
-            content = ""
-            reasoning = ""
+            pass
 
         # 로그 기록
         log_entry({
