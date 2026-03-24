@@ -83,7 +83,7 @@ echo "   네트워크: http://$LOCAL_IP:$PORT"
 [ -n "$TS_IP" ] && echo "   Tailscale: http://$TS_IP:$PORT"
 echo ""
 echo "   엔드포인트: /v1/chat/completions"
-echo "   🧠 Thinking: 요청별 제어 (\"no_think\": true 로 OFF)"
+echo "   🧠 Thinking: 기본 OFF (\"enable_thinking\": true 로 ON)"
 echo "   종료: Ctrl+C"
 echo "   💤 화면이 꺼져도 서버는 유지됩니다 (caffeinate)"
 
