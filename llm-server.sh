@@ -2,12 +2,16 @@
 # Qwen3.5-35B-A3B API 서버 실행 스크립트
 #
 # 사용법:
-#   ./llm-server.sh              # 기본 (262K, 포트 8080, Thinking ON, 로깅 ON)
+#   ./llm-server.sh              # 기본 (262K, 포트 8080, 로깅 ON)
 #   ./llm-server.sh 1m           # 1M 컨텍스트
-#   ./llm-server.sh --no-think   # Thinking OFF (JSON 출력 등에 유용)
 #   ./llm-server.sh --no-log     # 로깅 없이 실행
-#   ./llm-server.sh 1m --no-think --no-log  # 조합 가능
+#   ./llm-server.sh 1m --no-log  # 1M + 로깅 없이
 #   ./llm-server.sh 262k 9090    # 포트 지정
+#
+# Thinking 제어:
+#   서버는 항상 Thinking ON으로 실행됩니다.
+#   요청에 "no_think": true를 포함하면 프록시가 thinking을 제거합니다.
+#   (로깅 모드에서만 동작, --no-log 시에는 서버에 직접 전달)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$SCRIPT_DIR/.venv/bin"
@@ -17,7 +21,6 @@ HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
 MODEL_CONFIG=$(find "$HF_CACHE/models--mlx-community--Qwen3.5-35B-A3B-4bit/snapshots" -maxdepth 2 -name "config.json" 2>/dev/null | head -1)
 PORT=8080
 USE_LOG=true
-USE_THINK=true
 
 switch_profile() {
   case "$1" in
@@ -53,9 +56,6 @@ for arg in "$@"; do
     --no-log)
       USE_LOG=false
       ;;
-    --no-think)
-      USE_THINK=false
-      ;;
     *)
       if [[ "$arg" =~ ^[0-9]+$ ]]; then
         PORT="$arg"
@@ -65,11 +65,6 @@ for arg in "$@"; do
       ;;
   esac
 done
-
-# Thinking OFF 시 서버 인자에 추가
-if [ "$USE_THINK" = false ]; then
-  ARGS+=(--chat-template-args '{"enable_thinking":false}')
-fi
 
 # 프로필 인자 없으면 상태 표시
 if ! echo "$@" | grep -qE "1m|long|262k|default"; then
@@ -88,11 +83,7 @@ echo "   네트워크: http://$LOCAL_IP:$PORT"
 [ -n "$TS_IP" ] && echo "   Tailscale: http://$TS_IP:$PORT"
 echo ""
 echo "   엔드포인트: /v1/chat/completions"
-if [ "$USE_THINK" = true ]; then
-  echo "   🧠 Thinking: ON"
-else
-  echo "   🧠 Thinking: OFF (JSON 출력에 적합)"
-fi
+echo "   🧠 Thinking: 요청별 제어 (\"no_think\": true 로 OFF)"
 echo "   종료: Ctrl+C"
 echo "   💤 화면이 꺼져도 서버는 유지됩니다 (caffeinate)"
 
