@@ -98,7 +98,7 @@ else
   echo "   🧠 Thinking: OFF (기본, JSON 출력에 적합)"
 fi
 echo "   종료: Ctrl+C"
-echo "   💤 화면이 꺼져도 서버는 유지됩니다 (caffeinate)"
+echo "   💤 덮개 닫아도 서버 유지됩니다 (caffeinate -dis, 전원 연결 필요)"
 
 if [ "$USE_LOG" = true ]; then
   BACKEND_PORT=$((PORT + 1))
@@ -106,7 +106,7 @@ if [ "$USE_LOG" = true ]; then
   echo ""
 
   # 백엔드 서버 시작 (내부 포트)
-  caffeinate -di "$VENV/mlx_lm.server" --model "$MODEL" --host 127.0.0.1 --port "$BACKEND_PORT" "${ARGS[@]}" &
+  caffeinate -dis "$VENV/mlx_lm.server" --model "$MODEL" --host 127.0.0.1 --port "$BACKEND_PORT" "${ARGS[@]}" &
   BACKEND_PID=$!
 
   # 백엔드 시작 대기
@@ -123,5 +123,5 @@ if [ "$USE_LOG" = true ]; then
 else
   echo "   📝 로깅: OFF"
   echo ""
-  exec caffeinate -di "$VENV/mlx_lm.server" --model "$MODEL" --host 0.0.0.0 --port "$PORT" "${ARGS[@]}"
+  exec caffeinate -dis "$VENV/mlx_lm.server" --model "$MODEL" --host 0.0.0.0 --port "$PORT" "${ARGS[@]}"
 fi
