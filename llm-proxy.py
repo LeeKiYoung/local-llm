@@ -4,7 +4,8 @@ LLM 로깅 프록시 서버
 
 기능:
 - 요청/응답을 logs/ 폴더에 JSONL로 기록
-- 요청에 "no_think": true 포함 시 응답에서 thinking 제거 후 content만 반환
+- 요청에 "enable_thinking": false (또는 생략) 시 응답에서 thinking 제거 후 content만 반환
+- 요청에 "enable_thinking": true 시 thinking 포함하여 그대로 반환
 """
 
 import json
@@ -39,8 +40,8 @@ def log_entry(entry):
     prompt = entry.get("prompt_preview", "")[:60]
     tokens = entry.get("response", {}).get("usage", {}).get("total_tokens", "?")
     duration = entry.get("duration_ms", "?")
-    no_think = "🧠OFF" if entry.get("no_think") else "🧠ON"
-    print(f"  [{entry['timestamp']}] {ip} | {no_think} | {tokens} tokens | {duration}ms | {prompt}...")
+    thinking = "🧠OFF" if entry.get("strip_think") else "🧠ON"
+    print(f"  [{entry['timestamp']}] {ip} | {thinking} | {tokens} tokens | {duration}ms | {prompt}...")
 
 
 def strip_thinking(resp_data):
@@ -84,16 +85,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
 
-        # 프롬프트 파싱 + no_think 감지
-        no_think = False
+        # 프롬프트 파싱 + enable_thinking 감지
+        strip_think = True  # 기본: Thinking OFF → 응답에서 thinking 제거
         try:
             req_data = json.loads(body)
             messages = req_data.get("messages", [])
             last_msg = messages[-1]["content"] if messages else ""
-            # 기본값: no_think=True (Thinking OFF)
-            # 요청에 "no_think": false 를 명시하면 Thinking ON
-            no_think = req_data.pop("no_think", True)
-            # no_think 필드 제거 후 백엔드로 전달 (백엔드가 모르는 필드)
+            # enable_thinking: true → Thinking ON (strip 안 함)
+            # enable_thinking: false 또는 생략 → Thinking OFF (strip 함)
+            enable_thinking = req_data.pop("enable_thinking", False)
+            strip_think = not enable_thinking
+            # enable_thinking 제거 후 백엔드로 전달 (mlx_lm.server가 무시하므로)
             body = json.dumps(req_data).encode()
         except Exception:
             req_data = {}
@@ -125,7 +127,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "ip": self.client_address[0],
                 "path": self.path,
                 "prompt_preview": last_msg[:200],
-                "no_think": no_think,
+                "strip_think": strip_think,
                 "error": error_msg,
             })
             return
@@ -140,8 +142,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         try:
             resp_data = json.loads(resp_body)
 
-            # no_think 요청이면 thinking 제거
-            if no_think:
+            # strip_think 요청이면 thinking 제거
+            if strip_think:
                 resp_data = strip_thinking(resp_data)
                 resp_body = json.dumps(resp_data, ensure_ascii=False).encode()
 
@@ -159,7 +161,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "ip": self.client_address[0],
             "path": self.path,
             "duration_ms": duration_ms,
-            "no_think": no_think,
+            "strip_think": strip_think,
             "request": {
                 "model": req_data.get("model", "default"),
                 "messages": messages,
@@ -204,8 +206,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     print(f"📝 로깅 프록시: http://0.0.0.0:{PROXY_PORT} → http://localhost:{BACKEND_PORT}")
     print(f"📂 로그 저장: {LOG_DIR}/")
-    print(f"🧠 기본: Thinking OFF (no_think=true)")
-    print(f"💡 요청에 \"no_think\": false 추가하면 Thinking ON")
+    print(f"🧠 기본: Thinking OFF (enable_thinking 생략 또는 false)")
+    print(f"💡 요청에 \"enable_thinking\": true 추가하면 Thinking ON")
     print()
     server = HTTPServer(("0.0.0.0", PROXY_PORT), ProxyHandler)
     try:
