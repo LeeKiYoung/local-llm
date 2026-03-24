@@ -4,8 +4,7 @@ LLM 로깅 프록시 서버
 
 기능:
 - 요청/응답을 logs/ 폴더에 JSONL로 기록
-- 요청에 "enable_thinking": false (또는 생략) 시 응답에서 thinking 제거 후 content만 반환
-- 요청에 "enable_thinking": true 시 thinking 포함하여 그대로 반환
+- Thinking 제어는 서버 시작 옵션으로 (llm-server.sh --think)
 """
 
 import json
@@ -206,8 +205,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     print(f"📝 로깅 프록시: http://0.0.0.0:{PROXY_PORT} → http://localhost:{BACKEND_PORT}")
     print(f"📂 로그 저장: {LOG_DIR}/")
-    print(f"🧠 기본: Thinking OFF (enable_thinking 생략 또는 false)")
-    print(f"💡 요청에 \"enable_thinking\": true 추가하면 Thinking ON")
+    print(f"💡 Thinking 제어는 서버 시작 옵션으로 (--think / 기본 OFF)")
     print()
     server = HTTPServer(("0.0.0.0", PROXY_PORT), ProxyHandler)
     try:
