@@ -156,6 +156,10 @@ echo "📦 mlx-lm 설치 중..."
 "$SCRIPT_DIR/.venv/bin/pip" install mlx-lm -q
 echo "✅ mlx-lm 설치 완료"
 
+echo "📦 FastAPI + uvicorn 설치 중..."
+"$SCRIPT_DIR/.venv/bin/pip" install fastapi uvicorn -q
+echo "✅ FastAPI + uvicorn 설치 완료"
+
 # 7. HuggingFace 캐시 경로 안내
 HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
 echo ""
