@@ -26,7 +26,7 @@ cd local-llm
 `setup.sh`가 자동으로:
 1. Apple Silicon / Python / 메모리 확인
 2. 메모리에 맞는 모델 선택 메뉴 표시
-3. 가상환경 생성 + mlx-lm 설치
+3. 가상환경 생성 + mlx-lm + FastAPI + uvicorn 설치
 4. 선택한 모델 다운로드 + 스크립트에 자동 반영
 
 | # | 모델 | 메모리 | 속도 | 최소 RAM | 특징 |
@@ -76,27 +76,17 @@ source ~/.zshrc
 
 ```
 local-llm/
-├── .venv/                          # Python 3.11 가상환경
-│   └── bin/
-│       ├── mlx_lm.chat             # 대화형 채팅
-│       ├── mlx_lm.generate         # 단발 생성
-│       ├── mlx_lm.server           # OpenAI 호환 API 서버
-│       ├── mlx_lm.benchmark        # 성능 벤치마크
-│       ├── mlx_lm.convert          # 모델 포맷 변환
-│       ├── mlx_lm.lora             # LoRA 파인튜닝
-│       ├── mlx_lm.evaluate         # 모델 평가
-│       ├── mlx_lm.manage           # 모델 관리
-│       └── ...
+├── setup.sh                        # 자동 셋업 (환경 + 모델 + 의존성)
+├── llm-chat.sh                     # 대화형 채팅 (프로필 전환 포함)
+├── llm-server.sh                   # API 서버 실행 (프로필 전환 포함)
+├── llm-api-server.py               # FastAPI 커스텀 API 서버 (핵심)
 ├── profiles/
 │   ├── config-262k.json            # 기본 프로필 (262K 컨텍스트)
 │   └── config-1m.json              # 확장 프로필 (1M 컨텍스트, YaRN)
-├── setup.sh                        # 자동 셋업 스크립트
-├── llm-chat.sh                     # 프로필 전환 + 채팅 실행
-├── llm-server.sh                   # 프로필 전환 + API 서버 실행
-├── llm-api-server.py               # FastAPI 커스텀 API 서버
-├── llm-proxy.py                    # 로깅 프록시 (레거시)
-├── README.md                       # (이 파일)
-└── local-llm-guide-2026.md         # 모델 비교 가이드 문서
+├── test_api_server.py              # API 서버 테스트 (13개)
+├── local-llm-guide-2026.md         # 모델 비교 가이드 문서
+├── .venv/                          # Python 가상환경 (mlx-lm, fastapi, uvicorn)
+└── logs/                           # 요청/응답 JSONL 로그 (자동 생성)
 
 # 모델 캐시 (자동 다운로드됨)
 ~/.cache/huggingface/hub/models--mlx-community--Qwen3.5-35B-A3B-4bit/  (~19GB)
@@ -386,9 +376,13 @@ config.json을 교체하는 방식으로 전환.
 ### 전환 방법
 
 ```bash
-# 방법 1: llm-chat.sh로 전환 + 채팅 한번에
+# 채팅에서 전환
 ./llm-chat.sh 1m       # 1M 전환 후 채팅 시작
 ./llm-chat.sh 262k     # 262K 전환 후 채팅 시작
+
+# API 서버에서 전환
+./llm-server.sh 1m     # 1M 전환 후 서버 시작
+./llm-server.sh 262k   # 262K 전환 후 서버 시작
 
 # 현재 프로필 확인
 ./llm-chat.sh status
@@ -403,7 +397,7 @@ config.json을 교체하는 방식으로 전환.
 
 ### 주의사항
 
-- 전환 후 **mlx_lm 재시작 필요** (Ctrl+C → 다시 실행)
+- 전환 후 **재시작 필요** (Ctrl+C → 다시 실행)
 - 1M 모드는 짧은 프롬프트에서 품질 약간 저하 가능 (Static YaRN 특성)
 - 평소에는 262K로 충분. 정말 긴 문서 작업할 때만 1M 사용 권장
 
@@ -568,11 +562,11 @@ llm-chat status          # 프로필 확인
 
 ```bash
 # 프로세스 확인
-ps aux | grep mlx_lm | grep -v grep
+ps aux | grep llm-api-server | grep -v grep
 
 # 아무것도 안 나오면 → 메모리 해제된 상태
 # 프로세스가 보이면 → 아직 실행 중 (kill로 강제 종료 가능)
-kill $(pgrep -f mlx_lm)
+kill $(pgrep -f llm-api-server)
 ```
 
 ### 시스템 메모리 확인
