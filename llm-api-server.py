@@ -75,15 +75,36 @@ def parse_request(data: dict) -> dict:
 
 
 def normalize_messages(messages):
-    """OpenAI 멀티모달 포맷(배열)을 문자열로 정규화"""
+    """OpenAI 포맷을 Qwen3.5 채팅 템플릿 호환으로 정규화"""
     normalized = []
     for msg in messages:
-        content = msg.get("content", "")
+        m = {**msg}
+
+        # content: 배열 → 문자열 (멀티모달 포맷)
+        content = m.get("content", "")
         if isinstance(content, list):
-            # [{"type": "text", "text": "..."}] → 텍스트만 추출
             parts = [p.get("text", "") for p in content if p.get("type") == "text"]
-            content = "\n".join(parts)
-        normalized.append({**msg, "content": content})
+            m["content"] = "\n".join(parts)
+
+        # tool_calls: arguments가 JSON 문자열이면 dict로 파싱
+        # (OpenAI는 문자열, Qwen3.5 템플릿은 dict를 기대)
+        if "tool_calls" in m:
+            tool_calls = []
+            for tc in m["tool_calls"]:
+                tc = {**tc}
+                if "function" in tc:
+                    func = {**tc["function"]}
+                    args = func.get("arguments", "")
+                    if isinstance(args, str):
+                        try:
+                            func["arguments"] = json.loads(args)
+                        except (json.JSONDecodeError, TypeError):
+                            func["arguments"] = {}
+                    tc["function"] = func
+                tool_calls.append(tc)
+            m["tool_calls"] = tool_calls
+
+        normalized.append(m)
     return normalized
 
 
