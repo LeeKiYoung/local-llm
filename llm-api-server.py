@@ -187,7 +187,7 @@ def run_inference(params):
         if response.finish_reason == "length":
             finish_reason = "length"
 
-    mx.metal.clear_cache()
+    mx.clear_cache()
     return full_text, finish_reason, prompt_tokens, completion_tokens
 
 
@@ -214,7 +214,7 @@ def run_inference_streaming(params):
     ):
         yield response
 
-    mx.metal.clear_cache()
+    mx.clear_cache()
 
 
 # ── 엔드포인트 ────────────────────────────────────
@@ -325,7 +325,7 @@ def _stream_response(req_id, params, ip, start, last_msg):
 
                     yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': item.text}))}\n\n"
 
-                mx.metal.clear_cache()
+                mx.clear_cache()
 
                 # 최종 청크
                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {}, finish_reason))}\n\n"
