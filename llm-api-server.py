@@ -281,6 +281,9 @@ async def chat_completions(request: Request):
 
 
 # ── 스트리밍 ──────────────────────────────────────
+_SENTINEL = object()
+
+
 def _stream_response(req_id, params, ip, start, last_msg):
     async def event_generator():
         global pending
@@ -295,18 +298,34 @@ def _stream_response(req_id, params, ip, start, last_msg):
                 # 첫 청크: role
                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'role': 'assistant', 'content': ''}))}\n\n"
 
+                # 동기 제너레이터 → async Queue 브릿지 (진짜 토큰별 스트리밍)
+                queue = asyncio.Queue()
                 loop = asyncio.get_event_loop()
-                gen = partial(run_inference_streaming, params)
 
-                for response in await loop.run_in_executor(None, lambda: list(gen())):
-                    full_text += response.text
-                    prompt_tokens = response.prompt_tokens
-                    completion_tokens = response.generation_tokens
+                def _produce():
+                    try:
+                        for response in run_inference_streaming(params):
+                            loop.call_soon_threadsafe(queue.put_nowait, response)
+                    finally:
+                        loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
 
-                    if response.finish_reason == "length":
+                loop.run_in_executor(None, _produce)
+
+                while True:
+                    item = await queue.get()
+                    if item is _SENTINEL:
+                        break
+
+                    full_text += item.text
+                    prompt_tokens = item.prompt_tokens
+                    completion_tokens = item.generation_tokens
+
+                    if item.finish_reason == "length":
                         finish_reason = "length"
 
-                    yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': response.text}))}\n\n"
+                    yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': item.text}))}\n\n"
+
+                mx.metal.clear_cache()
 
                 # 최종 청크
                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {}, finish_reason))}\n\n"
