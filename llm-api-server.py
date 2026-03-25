@@ -74,6 +74,19 @@ def parse_request(data: dict) -> dict:
     }
 
 
+def normalize_messages(messages):
+    """OpenAI 멀티모달 포맷(배열)을 문자열로 정규화"""
+    normalized = []
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            # [{"type": "text", "text": "..."}] → 텍스트만 추출
+            parts = [p.get("text", "") for p in content if p.get("type") == "text"]
+            content = "\n".join(parts)
+        normalized.append({**msg, "content": content})
+    return normalized
+
+
 def get_prompt_preview(messages):
     if not messages:
         return ""
@@ -121,8 +134,9 @@ def make_chunk(req_id, model_name, delta, finish_reason=None):
 
 # ── 추론 ─────────────────────────────────────────
 def run_inference(params):
+    messages = normalize_messages(params["messages"])
     prompt = tokenizer.apply_chat_template(
-        params["messages"],
+        messages,
         add_generation_prompt=True,
         tokenize=False,
         enable_thinking=params["enable_thinking"],
@@ -157,8 +171,9 @@ def run_inference(params):
 
 
 def run_inference_streaming(params):
+    messages = normalize_messages(params["messages"])
     prompt = tokenizer.apply_chat_template(
-        params["messages"],
+        messages,
         add_generation_prompt=True,
         tokenize=False,
         enable_thinking=params["enable_thinking"],
