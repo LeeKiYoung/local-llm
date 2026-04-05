@@ -35,7 +35,8 @@ cd local-llm
 | 2 | Qwen3.5-9B | ~6GB | 40+ tok/s | 16GB+ | 가볍고 빠름 |
 | 3 | Qwen3.5-27B | ~17GB | 15 tok/s | 24GB+ | Dense, 코딩 벤치마크 최강 |
 | 4 | Qwen3-Coder-Next-80B | ~15GB | 25+ tok/s | 24GB+ | 코딩 에이전트 특화 |
-| 5 | 직접 입력 | - | - | - | Hugging Face 모델 ID |
+| 5 | Gemma 4 26B MoE (🆕) | ~15GB | 24 tok/s | 24GB+ | TurboQuant 지원, 멀티모달 |
+| 6 | 직접 입력 | - | - | - | Hugging Face 모델 ID |
 
 메모리에 따라 자동 추천이 표시됩니다.
 
@@ -635,6 +636,37 @@ llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B
 
 ## 메모리별 추천 모델 가이드
 
+### MoE vs Dense — 왜 MoE를 선택했나? (2026-03-25 리서치)
+
+로컬 LLM에서 양자화(4-bit)는 필수. 이때 **모델 아키텍처에 따라 가성비가 크게 달라짐:**
+
+| | MoE (Mixture of Experts) | Dense |
+|---|---|---|
+| **양자화 효율** | 좋음 — 활성 파라미터만 추론에 사용 | 나쁨 — 전체 파라미터가 추론에 참여 |
+| **속도** | 빠름 (활성 3B → 103 tok/s) | 느림 (27B → 15-25 tok/s) |
+| **리소스 가성비** | 높음 — 적은 메모리로 큰 모델 로드 | 낮음 — 전체가 메모리에 올라가야 함 |
+| **양자화 품질 손실** | routing 정확도 약간 저하 가능 | 파라미터 전체에 균일한 손실 |
+| **64GB 최적 선택** | ✅ **35B-A3B (메모리 29%)** | Llama-3.3-70B (메모리 ~70%, 빡빡) |
+
+**결론:** 제한된 메모리에서 양자화 돌리는 로컬 환경은 **MoE가 압도적으로 유리.**
+
+### 64GB에서 MoE 업그레이드 한계 (2026-03-25)
+
+현재 35B-A3B(활성 3B)에서 더 큰 MoE로 올리고 싶지만:
+
+| 모델 | 총 파라미터 | 활성 파라미터 | 4bit 크기 | 64GB 적합? |
+|---|---|---|---|---|
+| **Qwen3.5-35B-A3B** (현재) | 35B | **3B** | ~18GB | ✅ 여유 (29%) |
+| Qwen3-Coder-30B-A3B | 30B | **3B** | ~17GB | ✅ (코딩 특화, 활성 동일) |
+| Mixtral-8x7B | 47B | **13B** | ~25GB | ✅ (구형, 한국어 약함) |
+| Llama 4 Scout | 109B | **17B** | ~60GB | ⚠️ OS 여유 없음 |
+| **Qwen3.5-122B-A10B** | 122B | **10B** | **~69.6GB** | ❌ **5.6GB 초과** |
+| Qwen3.5-397B-A17B | 397B | **17B** | ~200GB+ | ❌ 불가 |
+
+- **122B-A10B (활성 10B)** 이 다음 단계지만 69.6GB로 64GB 초과
+- 동적 양자화(GGUF Q3)로 ~57GB까지 줄일 수 있으나 llama.cpp 필요 (MLX 아님)
+- **128GB Mac이면 122B-A10B가 바로 올라감** — 64GB의 한계 구간
+
 ### Apple Silicon 메모리별 추천
 
 | 메모리 | 추천 모델 | 양자화 | 메모리 사용 | 예상 속도 |
@@ -644,9 +676,8 @@ llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B
 | **24GB** | Qwen3.5-35B-A3B | Q3 | ~18GB | 80+ tok/s |
 | **32GB** | Qwen3.5-35B-A3B | Q4 | ~22GB | 100+ tok/s |
 | **48GB** | Qwen3.5-35B-A3B | Q6 | ~30GB | 80+ tok/s |
-| **64GB** | Qwen3.5-35B-A3B (Q4) + 여유 | Q4 | ~22GB | **103 tok/s** |
-| **64GB** | Qwen3.5-122B-A10B | Q4 | ~40GB | ~10 tok/s |
-| **128GB** | Qwen3.5-122B-A10B | Q8 | ~70GB | ~15 tok/s |
+| **64GB** | **Qwen3.5-35B-A3B (Q4)** — MoE 가성비 최적 | Q4 | ~22GB | **103 tok/s** |
+| **128GB** | Qwen3.5-122B-A10B — 활성 10B로 대폭 업그레이드 | Q4 | ~70GB | ~15 tok/s |
 | **128GB+** | Qwen3.5-397B (flash-moe) | Q4 | 5.5GB+SSD | ~4 tok/s |
 
 ### 용도별 추천
@@ -655,8 +686,9 @@ llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B
 |------|---------|------|
 | 코딩 에이전트 | Qwen3-Coder-Next 80B-A3B | SWE-bench, 에이전트 최강 |
 | 한국어 + 코딩 올라운더 | **Qwen3.5-35B-A3B** | 속도+품질+메모리 밸런스 최고 |
-| 코딩 품질 최우선 | Qwen3.5-27B (Dense) | SWE 72.4, LiveCode 80.7 |
-| 에이전트/도구 호출 | Qwen3.5-122B-A10B | BFCL 72.2, 도구 사용 압도적 |
+| 긴 컨텍스트 메모리 절약 | **Gemma 4 26B MoE** 🆕 | TurboQuant KV 캐시 63% 절감, 15GB |
+| 코딩 품질 최우선 | Qwen3.5-27B (Dense) | SWE 72.4, LiveCode 80.7 (메모리 여유 있을 때) |
+| 에이전트/도구 호출 | Qwen3.5-122B-A10B | BFCL 72.2, 도구 사용 압도적 (128GB 필요) |
 | 최고 지능 | Qwen3.5-397B (flash-moe) | SSD 스트리밍, 빌드 필요 |
 | 가볍고 빠르게 | Qwen3.5-9B | 6GB, 40+ tok/s |
 
@@ -712,8 +744,16 @@ API 서버 테스트 (mock 모델, GPU 불필요):
 
 - [MLX-LM GitHub](https://github.com/ml-explore/mlx-examples/tree/main/llms)
 - [mlx-community/Qwen3.5-35B-A3B-4bit](https://huggingface.co/mlx-community/Qwen3.5-35B-A3B-4bit)
+- [mlx-community/Qwen3.5-122B-A10B-4bit](https://huggingface.co/mlx-community/Qwen3.5-122B-A10B-4bit)
 - [Qwen3.5 공식 GitHub](https://github.com/QwenLM/Qwen3.5)
+- [Qwen3.5 로컬 가이드 (Unsloth)](https://unsloth.ai/docs/models/qwen3.5)
 - [Unsloth GGUF Benchmarks](https://unsloth.ai/docs/models/qwen3.5/gguf-benchmarks)
+- [Qwen3.5 GPU 요구사항 가이드](https://apxml.com/posts/qwen-3-5-system-requirement-vram-guide)
+- [Apple MLX + M5 리서치](https://machinelearning.apple.com/research/exploring-llms-mlx-m5)
+- [M5 Pro/Max 로컬 LLM 가이드](https://modelfit.io/blog/m5-pro-max-local-llm-2026/)
+- [Gemma 4 공식 블로그 (Google)](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/)
+- [TurboQuant (Google Research)](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/)
+- [Gemma 4 on Ollama](https://ollama.com/library/gemma4)
 
 ---
 

@@ -280,6 +280,156 @@ make
 
 ---
 
+## Gemma 4 + TurboQuant (2026-04 신규)
+
+> 출처: [Google Blog](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/) / [Google Research - TurboQuant](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/) / [Hugging Face Blog](https://huggingface.co/blog/gemma4)
+
+### Gemma 4 개요
+
+Google DeepMind가 2026-04-02에 공개한 오픈 모델 패밀리. **Apache 2.0** 라이선스.
+멀티모달(텍스트+이미지 입력), Tool calling 내장, 140+ 언어 지원.
+
+| 모델 | 구조 | 총 파라미터 | 활성 파라미터 | 컨텍스트 | 특징 |
+|------|------|--------:|----------:|------:|------|
+| Gemma 4 E2B | Dense (엣지) | 2B | 2B | 128K | 폰, Raspberry Pi, Jetson용 |
+| Gemma 4 E4B | Dense (엣지) | 4B | 4B | 128K | 모바일/엣지 최적화 |
+| **Gemma 4 26B** | **MoE** | **26B** | **3.8B** | **256K** | **30B급 성능, 4B급 리소스** |
+| Gemma 4 31B | Dense | 31B | 31B | 256K | 최고 성능, 메모리 많이 필요 |
+
+### TurboQuant — KV 캐시 극한 압축
+
+일반 양자화(Q4 등)는 **모델 가중치**를 압축하고, TurboQuant은 **추론 중 KV 캐시**를 압축.
+둘은 독립적이므로 **동시 적용 가능**. 컨텍스트가 길수록 효과 극대화.
+
+| 방식 | 압축 대상 | 효과 | 품질 손실 |
+|------|---------|------|---------|
+| Q4 양자화 | 모델 가중치 (디스크/RAM) | 메모리 ~4x 절감 | PPL +0.07 수준 |
+| TurboQuant TQ3 | KV 캐시 (추론 중) | 4.9x 압축 (MSE 0.034) | 거의 없음 |
+| TurboQuant TQ4 | KV 캐시 (추론 중) | 3.8x 압축 (MSE 0.009) | 무시 가능 |
+| **Q4 + TurboQuant** | **가중치 + KV 캐시** | **이중 절감** | **실용적 손실 없음** |
+
+### 커뮤니티 실측 결과
+
+**Gemma 4 31B + TurboQuant on MLX (128K 컨텍스트):**
+
+| 항목 | Before | After | 변화 |
+|------|--------|-------|------|
+| KV 메모리 | 13.3 GB | 4.9 GB | **-63%** |
+| 피크 메모리 | 75.2 GB | 65.8 GB | **-9.4 GB** |
+| 품질 | baseline | preserved | **손실 없음** |
+
+> 출처: [Prince Canuma (X/Twitter)](https://x.com/Prince_Canuma/status/2039840313074753896)
+
+**Gemma 4 26B MoE 로컬 벤치마크:**
+
+| 환경 | 프롬프트 처리 | 생성 속도 | 피크 메모리 |
+|------|----------:|--------:|--------:|
+| M2 Ultra (llama.cpp) | — | 300 tok/s | — |
+| M4 (MLX) | ~184 tok/s | ~23.6 tok/s | ~20GB |
+
+### M5 Pro 64GB에서 Gemma 4 적합성
+
+| 모델 | 메모리 (Q4) | 64GB 적합? | 비고 |
+|------|--------:|:---:|------|
+| Gemma 4 E2B | ~1.5GB | ✅ 여유 | 간단한 작업용 |
+| Gemma 4 E4B | ~3GB | ✅ 여유 | 모바일급이지만 빠름 |
+| **Gemma 4 26B MoE** | **~15GB** | **✅ 여유** | **활성 3.8B, 메인 후보** |
+| Gemma 4 31B Dense | ~18GB | ✅ 여유 | 성능 최고, 속도 느림 |
+| Gemma 4 31B + TurboQuant 128K | ~66GB (피크) | ⚠️ 빠듯 | 128K 풀컨텍스트 시 |
+
+### 커뮤니티 평가 요약
+
+**긍정적:**
+- MLX Day-0 지원 (mlx-vlm v0.4.3) — 비전, 오디오, MoE 전부 즉시 사용 가능
+- Ollama에서 `ollama run gemma4` / `ollama run gemma4:26b`로 바로 실행
+- 논문 공개 수 시간 만에 독립 구현 → needle-in-a-haystack 6/6 만점 (모든 양자화 레벨)
+- Apache 2.0 라이선스 → 상업적 사용 완전 자유
+
+**주의:**
+- llama.cpp/vLLM TurboQuant 네이티브 통합은 아직 실험적
+- decode 속도 ~1.5x 느려지는 커널 오버헤드 이슈 (수정 예정)
+- TurboQuant 장기 컨텍스트 품질은 "working hypothesis" 수준
+
+### 실행 방법
+
+```bash
+# Ollama
+ollama run gemma4          # E4B (기본)
+ollama run gemma4:26b      # 26B MoE (추천)
+
+# MLX (Unsloth — 메모리 ~40% 절감, 처리량 15-20% 낮음)
+pip install mlx-vlm
+# mlx-vlm으로 Gemma 4 지원
+
+# llama.cpp
+# Day-one 지원, TurboQuant 실험적
+```
+
+---
+
+## Gemma 4 vs Qwen3.5 — M5 Pro 64GB 비교
+
+### 동급 MoE 직접 비교: Gemma 4 26B vs Qwen3.5-35B-A3B
+
+| 항목 | Gemma 4 26B MoE | Qwen3.5-35B-A3B |
+|------|:--------------:|:---------------:|
+| 총 파라미터 | 26B | 35B |
+| **활성 파라미터** | **3.8B** | **3B** |
+| 메모리 (Q4) | ~15GB | ~20GB |
+| 컨텍스트 | 256K | 262K (1M 확장) |
+| 멀티모달 | 텍스트+이미지 | 텍스트+이미지 |
+| Tool calling | ✅ 내장 | ✅ 내장 |
+| 라이선스 | Apache 2.0 | Apache 2.0 |
+| Thinking 모드 | — | ✅ (ON/OFF 제어) |
+| 한국어 | 140+ 언어 지원 | 한국어 특화 |
+| MLX 지원 | Day-0 (mlx-vlm) | ✅ (mlx-lm 네이티브) |
+| Ollama | `gemma4:26b` | `qwen3.5:35b-a3b` |
+| TurboQuant | ✅ KV 캐시 63% 절감 | 미지원 (Gemma 전용) |
+| 생성 속도 (M4 MLX) | ~23.6 tok/s | ~103 tok/s |
+
+### 전체 모델 비교 (Gemma 4 포함)
+
+| 모델 | 활성 파라미터 | 메모리 | 속도 | 한국어 | 코딩 | 에이전트 | 비전 | 비고 |
+|------|----------:|------:|-----:|:---:|:---:|:---:|:---:|------|
+| **Qwen3-Coder-Next 80B-A3B** | 3B | ~15GB | ~25 tok/s | ★★ | ★★★ | ★★★ | X | 코딩 에이전트 최강 |
+| **★ Qwen3.5-35B-A3B (현재)** | 3B | ~20GB | ~103 tok/s | ★★★ | ★★ | ★★ | O | 올라운더, 속도 최강 |
+| **🆕 Gemma 4 26B MoE** | 3.8B | ~15GB | ~24 tok/s | ★★ | ★★ | ★★ | O | 메모리 효율, TurboQuant |
+| **🆕 Gemma 4 31B Dense** | 31B | ~18GB | ~15 tok/s | ★★ | ★★ | ★★ | O | Gemma 최고 성능 |
+| **Qwen3.5-27B** | 27B (Dense) | ~17GB | ~15 tok/s | ★★★ | ★★★ | ★★ | O | 코딩 벤치 최강 |
+| **Qwen3.5-122B-A10B** | 10B | ~40GB | ~10 tok/s | ★★★ | ★★ | ★★★ | 최강 | 도구 사용 압도적 |
+| **Qwen3.5-397B (flash-moe)** | 17B | 5.5GB+SSD | ~3-4 tok/s | ★★★ | ★★★ | ★★★ | O | SSD 스트리밍 |
+
+### Gemma 4 26B의 포지션
+
+- **메모리 효율 최고**: ~15GB로 Qwen3.5-35B-A3B보다 5GB 적음
+- **TurboQuant 독점**: 긴 컨텍스트(128K+)에서 KV 캐시 63% 절감 → 유일한 장점
+- **속도는 Qwen이 압도**: MLX에서 103 tok/s vs 24 tok/s (약 4배 차이)
+- **한국어는 Qwen이 우세**: Qwen3.5가 한국어 특화, Gemma는 범용 다국어
+- **듀얼 운용 매력적**: 35B-A3B(20GB) + Gemma 4 26B(15GB) = 35GB → 64GB에서 여유
+
+### 추천 시나리오
+
+| 시나리오 | 추천 모델 | 이유 |
+|---------|---------|------|
+| 한국어 + 빠른 속도 | Qwen3.5-35B-A3B | 103 tok/s, 한국어 특화 |
+| 긴 컨텍스트 (128K+) 메모리 절약 | **Gemma 4 26B + TurboQuant** | KV 캐시 63% 절감, 15GB |
+| 멀티모달 경량 | Gemma 4 E4B | 3GB, 오프라인 |
+| 코딩 에이전트 | Qwen3-Coder-Next 80B-A3B | SWE-bench 최강 |
+| 듀얼 운용 | 35B-A3B + Gemma 4 26B | 채팅은 Qwen, 긴 문서는 Gemma |
+
+### 참고 링크 (Gemma 4)
+
+- [Gemma 4 공식 블로그 (Google)](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/)
+- [Gemma 4 — Google DeepMind](https://deepmind.google/models/gemma/gemma-4/)
+- [Gemma 4 on Ollama](https://ollama.com/library/gemma4)
+- [Gemma 4 on Hugging Face](https://huggingface.co/blog/gemma4)
+- [TurboQuant (Google Research)](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/)
+- [TurboQuant MLX 구현 (GitHub)](https://github.com/sharpner/turboquant-mlx)
+- [Gemma 4 Hardware Guide (Compute Market)](https://www.compute-market.com/blog/gemma-4-local-hardware-guide-2026)
+- [Unsloth Gemma 4 로컬 가이드](https://unsloth.ai/docs/models/gemma-4)
+
+---
+
 ## 참고 사항
 
 - **MoE 모델**: 전체 파라미터 중 일부만 활성화 → 큰 모델의 지능 + 작은 모델의 속도
