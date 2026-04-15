@@ -282,8 +282,18 @@ kill $(pgrep -f llm-api-server)
 
 - [MLX-LM GitHub](https://github.com/ml-explore/mlx-examples/tree/main/llms)
 - [Qwen3.5-35B-A3B (MLX 4bit)](https://huggingface.co/mlx-community/Qwen3.5-35B-A3B-4bit)
-- [SuperGemma4 26B (MLX 4bit)](https://huggingface.co/Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit)
+- [Qwen3.5-122B-A10B (MLX 4bit)](https://huggingface.co/mlx-community/Qwen3.5-122B-A10B-4bit)
+- [Qwen3.5 공식 GitHub](https://github.com/QwenLM/Qwen3.5)
+- [Qwen3.5 로컬 가이드 (Unsloth)](https://unsloth.ai/docs/models/qwen3.5)
+- [SuperGemma4 26B MLX 4bit](https://huggingface.co/Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit)
+- [SuperGemma4 26B GGUF](https://huggingface.co/Jiunsong/supergemma4-26b-uncensored-gguf-v2)
 - [Gemma 4 공식 블로그 (Google)](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/)
+- [TurboQuant (Google Research)](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/)
+- [Gemma 4 on Ollama](https://ollama.com/library/gemma4)
+- [Apple MLX + M5 리서치](https://machinelearning.apple.com/research/exploring-llms-mlx-m5)
+- [M5 Pro/Max 로컬 LLM 가이드](https://modelfit.io/blog/m5-pro-max-local-llm-2026/)
+- [Unsloth GGUF Benchmarks](https://unsloth.ai/docs/models/qwen3.5/gguf-benchmarks)
+- [whatcani.run — Apple Silicon 실측 LLM 벤치마크](https://www.whatcani.run/)
 
 ---
 
