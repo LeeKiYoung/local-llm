@@ -31,10 +31,10 @@ echo "✅ Apple Silicon 확인 ($ARCH)"
 PYTHON=""
 for cmd in python3.12 python3.11 python3.10 python3; do
   if command -v "$cmd" &>/dev/null; then
-    VER=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
+    VER=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null) || continue
     MAJOR=$(echo "$VER" | cut -d. -f1)
     MINOR=$(echo "$VER" | cut -d. -f2)
-    if [ "$MAJOR" -ge 3 ] && [ "$MINOR" -ge 10 ]; then
+    if [ -n "$MAJOR" ] && [ -n "$MINOR" ] && [ "$MAJOR" -ge 3 ] && [ "$MINOR" -ge 10 ]; then
       PYTHON="$cmd"
       break
     fi
@@ -81,10 +81,11 @@ if [ "$1" != "--no-model" ]; then
   echo "  │  #  │ 모델                     │ 메모리 │ 속도      │ 최소   │ 특징                         │"
   echo "  ├─────┼──────────────────────────┼────────┼───────────┼────────┼──────────────────────────────┤"
   echo "  │  1  │ Qwen3.5-35B-A3B    ⭐    │ ~20GB  │ 103 tok/s │ 24GB+  │ 한국어+코딩+비전 올라운더     │"
-  echo "  │  2  │ Qwen3.5-9B               │ ~6GB   │ 40+ tok/s │ 16GB+  │ 가볍고 빠름                   │"
-  echo "  │  3  │ Qwen3.5-27B              │ ~17GB  │ 15  tok/s │ 24GB+  │ Dense, 코딩 벤치마크 최강     │"
-  echo "  │  4  │ Qwen3-Coder-Next-80B     │ ~15GB  │ 25+ tok/s │ 24GB+  │ 코딩 에이전트 특화            │"
-  echo "  │  5  │ 직접 입력                │ -      │ -         │ -      │ Hugging Face 모델 ID         │"
+  echo "  │  2  │ SuperGemma4-26B          │ ~16GB  │ -         │ 24GB+  │ 텍스트 전용 (현재 서버 기준)  │"
+  echo "  │  3  │ Qwen3.5-9B               │ ~6GB   │ 40+ tok/s │ 16GB+  │ 가볍고 빠름                   │"
+  echo "  │  4  │ Qwen3.5-27B              │ ~17GB  │ 15  tok/s │ 24GB+  │ Dense, 코딩 벤치마크 최강     │"
+  echo "  │  5  │ Qwen3-Coder-Next-80B     │ ~15GB  │ 25+ tok/s │ 24GB+  │ 코딩 에이전트 특화            │"
+  echo "  │  6  │ 직접 입력                │ -      │ -         │ -      │ Hugging Face 모델 ID         │"
   echo "  └─────┴──────────────────────────┴────────┴───────────┴────────┴──────────────────────────────┘"
   echo ""
 
@@ -100,7 +101,7 @@ if [ "$1" != "--no-model" ]; then
   fi
   echo ""
 
-  read -p "  선택 [1-5] (기본: 1): " MODEL_CHOICE
+  read -p "  선택 [1-6] (기본: 1): " MODEL_CHOICE
   MODEL_CHOICE=${MODEL_CHOICE:-1}
 
   case "$MODEL_CHOICE" in
@@ -108,26 +109,37 @@ if [ "$1" != "--no-model" ]; then
       MODEL="mlx-community/Qwen3.5-35B-A3B-4bit"
       MODEL_NAME="Qwen3.5-35B-A3B-4bit"
       MODEL_SIZE="~19GB"
+      SERVER_ARG=""
       ;;
     2)
+      MODEL="Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit"
+      MODEL_NAME="SuperGemma4-26B-4bit"
+      MODEL_SIZE="~16GB"
+      SERVER_ARG="supergemma4"
+      ;;
+    3)
       MODEL="mlx-community/Qwen3.5-9B-4bit"
       MODEL_NAME="Qwen3.5-9B-4bit"
       MODEL_SIZE="~6GB"
+      SERVER_ARG=""
       ;;
-    3)
+    4)
       MODEL="mlx-community/Qwen3.5-27B-4bit"
       MODEL_NAME="Qwen3.5-27B-4bit"
       MODEL_SIZE="~17GB"
+      SERVER_ARG=""
       ;;
-    4)
+    5)
       MODEL="mlx-community/Qwen3-Coder-Next-80B-A3B-4bit"
       MODEL_NAME="Qwen3-Coder-Next-4bit"
       MODEL_SIZE="~15GB"
+      SERVER_ARG=""
       ;;
-    5)
+    6)
       read -p "  Hugging Face 모델 ID: " MODEL
       MODEL_NAME="$MODEL"
       MODEL_SIZE="알 수 없음"
+      SERVER_ARG=""
       ;;
     *)
       echo "❌ 잘못된 선택입니다."
@@ -153,8 +165,8 @@ fi
 echo ""
 echo "📦 mlx-lm 설치 중..."
 "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
-"$SCRIPT_DIR/.venv/bin/pip" install mlx-lm -q
-echo "✅ mlx-lm 설치 완료"
+"$SCRIPT_DIR/.venv/bin/pip" install "git+https://github.com/ml-explore/mlx-lm.git" -q
+echo "✅ mlx-lm 설치 완료 (GitHub 최신 — gemma4 지원 포함)"
 
 echo "📦 FastAPI + uvicorn 설치 중..."
 "$SCRIPT_DIR/.venv/bin/pip" install fastapi uvicorn -q
@@ -205,7 +217,11 @@ echo "============================================"
 echo ""
 echo "  채팅 시작:    ./llm-chat.sh"
 echo "  1M 컨텍스트:  ./llm-chat.sh 1m"
-echo "  API 서버:     ./llm-server.sh"
+if [ -n "$SERVER_ARG" ]; then
+  echo "  API 서버:     ./llm-server.sh $SERVER_ARG"
+else
+  echo "  API 서버:     ./llm-server.sh"
+fi
 echo "  상태 확인:    ./llm-chat.sh status"
 echo ""
 echo "  Alias 설정 (선택):"
