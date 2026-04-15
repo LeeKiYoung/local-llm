@@ -1,5 +1,5 @@
 #!/bin/bash
-# Qwen3.5-35B-A3B API 서버 실행 스크립트
+# Qwen3.5-35B-A3B / SuperGemma4 API 서버 실행 스크립트
 #
 # 사용법:
 #   ./llm-server.sh              # 기본 (Thinking OFF)
@@ -7,6 +7,8 @@
 #   ./llm-server.sh --think      # Thinking ON (수학/코딩 정확도 향상)
 #   ./llm-server.sh 1m --think   # 1M + Thinking ON
 #   ./llm-server.sh 262k 9090    # 포트 지정
+#   ./llm-server.sh supergemma4    # SuperGemma4 모델
+#   ./llm-server.sh supergemma4 --think  # SuperGemma4 + Thinking (모델이 지원하는 경우만)
 #
 # Thinking 제어:
 #   기본 Thinking OFF. --think 옵션으로 기본 ON.
@@ -46,6 +48,9 @@ show_status() {
 SERVER_ARGS=()
 for arg in "$@"; do
   case "$arg" in
+    supergemma4)
+      MODEL="Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit"
+      ;;
     1m|long)
       switch_profile 1m
       ;;
