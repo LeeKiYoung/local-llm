@@ -1,10 +1,11 @@
-# Local LLM — Qwen3.5-35B-A3B (MLX)
+# Local LLM — Qwen3.5 / SuperGemma4 (MLX)
 
 > **Apple Silicon Mac 전용** (M1/M2/M3/M4/M5)
 > MLX는 Apple의 네이티브 ML 프레임워크로, Apple Silicon에서만 동작합니다.
 > NVIDIA GPU / Intel Mac / Windows / Linux는 지원하지 않습니다.
 
-Apple Silicon Mac에서 Qwen3.5-35B-A3B를 MLX로 돌리기 위한 셋업 가이드.
+Apple Silicon Mac에서 MLX 기반 LLM을 OpenAI 호환 API 서버로 실행하는 프로젝트.
+현재 지원 모델: **Qwen3.5-35B-A3B** (텍스트, 기본) / **SuperGemma4-26B** (텍스트, 무검열)
 
 ## 요구사항
 
@@ -35,8 +36,9 @@ cd local-llm
 | 2 | Qwen3.5-9B | ~6GB | 40+ tok/s | 16GB+ | 가볍고 빠름 |
 | 3 | Qwen3.5-27B | ~17GB | 15 tok/s | 24GB+ | Dense, 코딩 벤치마크 최강 |
 | 4 | Qwen3-Coder-Next-80B | ~15GB | 25+ tok/s | 24GB+ | 코딩 에이전트 특화 |
-| 5 | Gemma 4 26B MoE (🆕) | ~15GB | 24 tok/s | 24GB+ | TurboQuant 지원, 멀티모달 |
-| 6 | 직접 입력 | - | - | - | Hugging Face 모델 ID |
+| 5 | Gemma 4 26B MoE | ~15GB | ~42 tok/s | 24GB+ | TurboQuant, 멀티모달, 256K 컨텍스트 |
+| 6 | **SuperGemma4 26B** (🔥) | ~15.6GB | ~46 tok/s | 24GB+ | 무검열+멀티모달+툴콜 수정, Gemma4 기반 |
+| 7 | 직접 입력 | - | - | - | Hugging Face 모델 ID |
 
 메모리에 따라 자동 추천이 표시됩니다.
 
@@ -93,18 +95,21 @@ local-llm/
 ~/.cache/huggingface/hub/models--mlx-community--Qwen3.5-35B-A3B-4bit/  (~19GB)
 ```
 
-## 현재 모델 스펙
+## 지원 모델 스펙
 
-| 항목 | 값 |
-|------|-----|
-| 모델 | Qwen3.5-35B-A3B |
-| 양자화 | 4-bit (MLX 네이티브) |
-| 디스크 크기 | ~19GB |
-| 런타임 메모리 | ~19.6GB |
-| 구조 | MoE (256 전문가, 토큰당 3B 활성) |
-| 컨텍스트 | 262K (1M 확장 가능) |
-| 생성 속도 | ~103 tok/s |
-| 프롬프트 처리 | ~170 tok/s |
+| 항목 | Qwen3.5-35B-A3B (기본) | SuperGemma4-26B |
+|------|----------------------|-----------------|
+| 실행 명령 | `./llm-server.sh 1m` | `./llm-server.sh supergemma4` |
+| HF 모델 ID | `mlx-community/Qwen3.5-35B-A3B-4bit` | `Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit` |
+| 양자화 | 4-bit (MLX 네이티브) | 4-bit (MLX 네이티브) |
+| 디스크 크기 | ~19GB | ~15.6GB |
+| 런타임 메모리 | ~19.6GB | ~15GB |
+| 구조 | MoE (256 전문가, 3B 활성) | MoE (Gemma4 기반) |
+| 컨텍스트 | 262K (1M 확장 가능) | 128K |
+| 생성 속도 | ~103 tok/s | ~46 tok/s |
+| Thinking 모드 | ✅ (`enable_thinking`) | ❌ (미지원) |
+| 컨텍스트 프로필 | ✅ (1m / 262k) | ❌ (고정) |
+| 특징 | 한국어+코딩 올라운더 | 무검열, 툴콜 강화 |
 
 ---
 
@@ -213,12 +218,21 @@ OpenAI 호환 API 서버. FastAPI + mlx_lm Python API로 직접 추론.
 같은 네트워크의 다른 기기(맥미니 등)에서 접속 가능.
 
 ```bash
-./llm-server.sh              # 기본 (Thinking OFF)
-./llm-server.sh --think      # Thinking ON (수학/코딩 정확도 향상)
-./llm-server.sh 1m           # 1M 컨텍스트
+# Qwen3.5 (기본)
+./llm-server.sh              # 262K 컨텍스트, Thinking OFF
+./llm-server.sh 1m           # 1M 컨텍스트 (YaRN)
+./llm-server.sh --think      # Thinking ON
 ./llm-server.sh 1m --think   # 1M + Thinking ON
 ./llm-server.sh 262k 9090    # 포트 지정
+
+# SuperGemma4 (텍스트 전용)
+./llm-server.sh supergemma4          # SuperGemma4 로드 (첫 실행 시 ~15GB 다운로드)
+./llm-server.sh supergemma4 9090     # 포트 지정
 ```
+
+> **모델별 차이점**
+> - `1m` / `262k` 프로필: **Qwen3.5 전용** (SuperGemma4에는 적용 안 됨)
+> - `--think` / `enable_thinking`: **Qwen3.5 전용** (SuperGemma4는 자동 처리)
 
 실행하면:
 
@@ -367,9 +381,25 @@ mlx_lm.benchmark \
   --num-trials 3
 ```
 
+### 커뮤니티 벤치마크 공유 (whatcani.run)
+
+[whatcani.run](https://www.whatcani.run/)은 실사용자들이 자신의 하드웨어에서 직접 측정한 LLM 벤치마크를 공유하는 플랫폼. MLX/llama.cpp 런타임 공식 지원. 26M+ 토큰, 5,000+ 실행 결과 기반.
+
+```bash
+# Node/Bun 설치 후 바로 실행 가능
+bunx whatcanirun run \
+  --model mlx-community/Qwen3.5-35B-A3B-4bit \
+  --runtime mlx \
+  --submit    # 결과를 커뮤니티에 기여
+```
+
+> **M5 Pro 64GB** 데이터는 현재 미등록 상태 — 제출하면 커뮤니티 최초 기여 가능!
+
 ---
 
-## 컨텍스트 프로필 시스템
+## 컨텍스트 프로필 시스템 (Qwen3.5 전용)
+
+> **SuperGemma4에는 적용되지 않습니다.** 프로필은 Qwen3.5 모델의 `config.json`을 직접 교체하는 방식이라 모델별로 다릅니다.
 
 262K(기본)와 1M(확장) 두 가지 프로필을 미리 준비해둠.
 config.json을 교체하는 방식으로 전환.
@@ -415,7 +445,9 @@ YaRN(Yet another RoPE extensioN)으로 위치 인코딩을 스케일링.
 
 ---
 
-## Thinking 모드
+## Thinking 모드 (Qwen3.5 전용)
+
+> **SuperGemma4는 `enable_thinking` 파라미터를 지원하지 않습니다.** 서버가 자동으로 감지해 무시하므로 오류는 없지만 효과도 없습니다.
 
 Qwen3.5는 기본적으로 **Thinking 모드 ON**. 답변 전에 추론 과정을 거침.
 
@@ -686,7 +718,8 @@ llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B
 |------|---------|------|
 | 코딩 에이전트 | Qwen3-Coder-Next 80B-A3B | SWE-bench, 에이전트 최강 |
 | 한국어 + 코딩 올라운더 | **Qwen3.5-35B-A3B** | 속도+품질+메모리 밸런스 최고 |
-| 긴 컨텍스트 메모리 절약 | **Gemma 4 26B MoE** 🆕 | TurboQuant KV 캐시 63% 절감, 15GB |
+| 긴 컨텍스트 메모리 절약 | **Gemma 4 26B MoE** | TurboQuant KV 캐시 63% 절감, 15GB, 256K |
+| 무검열 + 멀티모달 | **SuperGemma4 26B** 🔥 | 완전 무검열(Abliterated), 이미지 지원, 툴콜 2배 향상, 15.6GB |
 | 코딩 품질 최우선 | Qwen3.5-27B (Dense) | SWE 72.4, LiveCode 80.7 (메모리 여유 있을 때) |
 | 에이전트/도구 호출 | Qwen3.5-122B-A10B | BFCL 72.2, 도구 사용 압도적 (128GB 필요) |
 | 최고 지능 | Qwen3.5-397B (flash-moe) | SSD 스트리밍, 빌드 필요 |
@@ -704,13 +737,20 @@ llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B
 
 ### 벤치마크 비교 (주요 모델)
 
-| 벤치마크 | 35B-A3B | 27B | 122B-A10B | GPT-5 mini | Claude Sonnet 4.5 |
-|---------|:-------:|:---:|:---------:|:---------:|:-----------------:|
-| MMLU-Pro | 85.3 | 86.1 | **86.7** | 83.7 | 80.8 |
-| SWE-bench | 69.2 | **72.4** | 72.0 | 72.0 | 62.0 |
-| LiveCodeBench | 74.6 | **80.7** | 78.9 | 80.5 | 82.7 |
-| BFCL-V4 (도구) | 67.3 | 68.5 | **72.2** | 55.5 | 54.8 |
-| MMMU-Pro (비전) | 68.4 | 67.3 | **76.9** | 67.3 | 75.0 |
+> ¹ Gemma 4 26B-A4B-it 공식 벤치마크 기준. SuperGemma4는 자체 Quick Bench +4~8% 추가 주장 (독립 검증 미완료).
+
+| 벤치마크 | 35B-A3B | 27B | 122B-A10B | SuperGemma4 26B¹ | GPT-5 mini | Claude Sonnet 4.5 |
+|---------|:-------:|:---:|:---------:|:----------------:|:---------:|:-----------------:|
+| MMLU-Pro | **85.3** | 86.1 | **86.7** | 82.6 | 83.7 | 80.8 |
+| SWE-bench | 69.2 | **72.4** | 72.0 | - | 72.0 | 62.0 |
+| LiveCodeBench | 74.6 | **80.7** | 78.9 | 77.1 | 80.5 | 82.7 |
+| BFCL-V4 (도구) | 67.3 | 68.5 | **72.2** | 툴콜 2배↑(자체측정) | 55.5 | 54.8 |
+| MMMU-Pro (비전) | 68.4 | 67.3 | **76.9** | 73.8 | 67.3 | 75.0 |
+| GPQA Diamond | - | - | - | **82.3** | - | - |
+| 생성 속도 (MLX 4bit) | **103 tok/s** | ~15 tok/s | - | ~46 tok/s | - | - |
+| 프롬프트 처리 (MLX) | **170 tok/s** | - | - | ~328 tok/s² | - | - |
+
+> ² MLX BF16 원본 대비 양자화 효과 포함 수치.
 
 ---
 
@@ -754,6 +794,9 @@ API 서버 테스트 (mock 모델, GPU 불필요):
 - [Gemma 4 공식 블로그 (Google)](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/)
 - [TurboQuant (Google Research)](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/)
 - [Gemma 4 on Ollama](https://ollama.com/library/gemma4)
+- [SuperGemma4 26B MLX 4bit (멀티모달)](https://huggingface.co/Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit)
+- [SuperGemma4 26B GGUF (텍스트, 트렌딩)](https://huggingface.co/Jiunsong/supergemma4-26b-uncensored-gguf-v2)
+- [whatcani.run — Apple Silicon 실측 LLM 벤치마크](https://www.whatcani.run/)
 
 ---
 
