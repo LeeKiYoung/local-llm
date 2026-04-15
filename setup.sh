@@ -81,10 +81,11 @@ if [ "$1" != "--no-model" ]; then
   echo "  │  #  │ 모델                     │ 메모리 │ 속도      │ 최소   │ 특징                         │"
   echo "  ├─────┼──────────────────────────┼────────┼───────────┼────────┼──────────────────────────────┤"
   echo "  │  1  │ Qwen3.5-35B-A3B    ⭐    │ ~20GB  │ 103 tok/s │ 24GB+  │ 한국어+코딩+비전 올라운더     │"
-  echo "  │  2  │ Qwen3.5-9B               │ ~6GB   │ 40+ tok/s │ 16GB+  │ 가볍고 빠름                   │"
-  echo "  │  3  │ Qwen3.5-27B              │ ~17GB  │ 15  tok/s │ 24GB+  │ Dense, 코딩 벤치마크 최강     │"
-  echo "  │  4  │ Qwen3-Coder-Next-80B     │ ~15GB  │ 25+ tok/s │ 24GB+  │ 코딩 에이전트 특화            │"
-  echo "  │  5  │ 직접 입력                │ -      │ -         │ -      │ Hugging Face 모델 ID         │"
+  echo "  │  2  │ SuperGemma4-26B          │ ~16GB  │ -         │ 24GB+  │ 멀티모달 (이미지 지원)        │"
+  echo "  │  3  │ Qwen3.5-9B               │ ~6GB   │ 40+ tok/s │ 16GB+  │ 가볍고 빠름                   │"
+  echo "  │  4  │ Qwen3.5-27B              │ ~17GB  │ 15  tok/s │ 24GB+  │ Dense, 코딩 벤치마크 최강     │"
+  echo "  │  5  │ Qwen3-Coder-Next-80B     │ ~15GB  │ 25+ tok/s │ 24GB+  │ 코딩 에이전트 특화            │"
+  echo "  │  6  │ 직접 입력                │ -      │ -         │ -      │ Hugging Face 모델 ID         │"
   echo "  └─────┴──────────────────────────┴────────┴───────────┴────────┴──────────────────────────────┘"
   echo ""
 
@@ -100,7 +101,7 @@ if [ "$1" != "--no-model" ]; then
   fi
   echo ""
 
-  read -p "  선택 [1-5] (기본: 1): " MODEL_CHOICE
+  read -p "  선택 [1-6] (기본: 1): " MODEL_CHOICE
   MODEL_CHOICE=${MODEL_CHOICE:-1}
 
   case "$MODEL_CHOICE" in
@@ -110,21 +111,26 @@ if [ "$1" != "--no-model" ]; then
       MODEL_SIZE="~19GB"
       ;;
     2)
+      MODEL="Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit"
+      MODEL_NAME="SuperGemma4-26B-4bit"
+      MODEL_SIZE="~16GB"
+      ;;
+    3)
       MODEL="mlx-community/Qwen3.5-9B-4bit"
       MODEL_NAME="Qwen3.5-9B-4bit"
       MODEL_SIZE="~6GB"
       ;;
-    3)
+    4)
       MODEL="mlx-community/Qwen3.5-27B-4bit"
       MODEL_NAME="Qwen3.5-27B-4bit"
       MODEL_SIZE="~17GB"
       ;;
-    4)
+    5)
       MODEL="mlx-community/Qwen3-Coder-Next-80B-A3B-4bit"
       MODEL_NAME="Qwen3-Coder-Next-4bit"
       MODEL_SIZE="~15GB"
       ;;
-    5)
+    6)
       read -p "  Hugging Face 모델 ID: " MODEL
       MODEL_NAME="$MODEL"
       MODEL_SIZE="알 수 없음"
