@@ -156,11 +156,15 @@ def make_chunk(req_id, model_name, delta, finish_reason=None):
 # ── 추론 ─────────────────────────────────────────
 def run_inference(params):
     messages = normalize_messages(params["messages"])
+    # Build template kwargs — only pass enable_thinking if the tokenizer's template supports it
+    tmpl_kwargs = {}
+    if params["enable_thinking"] and getattr(tokenizer, "chat_template", "") and "enable_thinking" in tokenizer.chat_template:
+        tmpl_kwargs["enable_thinking"] = True
     prompt = tokenizer.apply_chat_template(
         messages,
         add_generation_prompt=True,
         tokenize=False,
-        enable_thinking=params["enable_thinking"],
+        **tmpl_kwargs,
     )
 
     sampler = make_sampler(
@@ -193,11 +197,15 @@ def run_inference(params):
 
 def run_inference_streaming(params):
     messages = normalize_messages(params["messages"])
+    # Build template kwargs — only pass enable_thinking if the tokenizer's template supports it
+    tmpl_kwargs = {}
+    if params["enable_thinking"] and getattr(tokenizer, "chat_template", "") and "enable_thinking" in tokenizer.chat_template:
+        tmpl_kwargs["enable_thinking"] = True
     prompt = tokenizer.apply_chat_template(
         messages,
         add_generation_prompt=True,
         tokenize=False,
-        enable_thinking=params["enable_thinking"],
+        **tmpl_kwargs,
     )
 
     sampler = make_sampler(

@@ -63,6 +63,8 @@ def setup():
     server_module.model = MagicMock()
     server_module.tokenizer = MagicMock()
     server_module.tokenizer.apply_chat_template.return_value = "formatted prompt"
+    # Simulate a tokenizer whose chat_template supports enable_thinking (Qwen3.5-style)
+    server_module.tokenizer.chat_template = "...enable_thinking..."
     server_module.model_id = "test-model"
     server_module.gpu_semaphore = asyncio.Semaphore(1)
     server_module.pending = 0
@@ -129,7 +131,8 @@ class TestChatCompletions:
         })
         assert resp.status_code == 200
         call_kwargs = server_module.tokenizer.apply_chat_template.call_args
-        assert call_kwargs.kwargs.get("enable_thinking") is False
+        # enable_thinking=False means the kwarg is omitted entirely (not passed as False)
+        assert "enable_thinking" not in call_kwargs.kwargs
 
     def test_custom_parameters(self, client):
         resp = client.post("/v1/chat/completions", json={
