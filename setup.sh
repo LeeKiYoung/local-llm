@@ -153,8 +153,8 @@ fi
 echo ""
 echo "📦 mlx-lm 설치 중..."
 "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
-"$SCRIPT_DIR/.venv/bin/pip" install mlx-lm -q
-echo "✅ mlx-lm 설치 완료"
+"$SCRIPT_DIR/.venv/bin/pip" install "git+https://github.com/ml-explore/mlx-lm.git" -q
+echo "✅ mlx-lm 설치 완료 (GitHub 최신 — gemma4 지원 포함)"
 
 echo "📦 FastAPI + uvicorn 설치 중..."
 "$SCRIPT_DIR/.venv/bin/pip" install fastapi uvicorn -q
