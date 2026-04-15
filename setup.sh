@@ -31,10 +31,10 @@ echo "✅ Apple Silicon 확인 ($ARCH)"
 PYTHON=""
 for cmd in python3.12 python3.11 python3.10 python3; do
   if command -v "$cmd" &>/dev/null; then
-    VER=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
+    VER=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null) || continue
     MAJOR=$(echo "$VER" | cut -d. -f1)
     MINOR=$(echo "$VER" | cut -d. -f2)
-    if [ "$MAJOR" -ge 3 ] && [ "$MINOR" -ge 10 ]; then
+    if [ -n "$MAJOR" ] && [ -n "$MINOR" ] && [ "$MAJOR" -ge 3 ] && [ "$MINOR" -ge 10 ]; then
       PYTHON="$cmd"
       break
     fi
