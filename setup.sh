@@ -109,31 +109,37 @@ if [ "$1" != "--no-model" ]; then
       MODEL="mlx-community/Qwen3.5-35B-A3B-4bit"
       MODEL_NAME="Qwen3.5-35B-A3B-4bit"
       MODEL_SIZE="~19GB"
+      SERVER_ARG=""
       ;;
     2)
       MODEL="Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit"
       MODEL_NAME="SuperGemma4-26B-4bit"
       MODEL_SIZE="~16GB"
+      SERVER_ARG="supergemma4"
       ;;
     3)
       MODEL="mlx-community/Qwen3.5-9B-4bit"
       MODEL_NAME="Qwen3.5-9B-4bit"
       MODEL_SIZE="~6GB"
+      SERVER_ARG=""
       ;;
     4)
       MODEL="mlx-community/Qwen3.5-27B-4bit"
       MODEL_NAME="Qwen3.5-27B-4bit"
       MODEL_SIZE="~17GB"
+      SERVER_ARG=""
       ;;
     5)
       MODEL="mlx-community/Qwen3-Coder-Next-80B-A3B-4bit"
       MODEL_NAME="Qwen3-Coder-Next-4bit"
       MODEL_SIZE="~15GB"
+      SERVER_ARG=""
       ;;
     6)
       read -p "  Hugging Face 모델 ID: " MODEL
       MODEL_NAME="$MODEL"
       MODEL_SIZE="알 수 없음"
+      SERVER_ARG=""
       ;;
     *)
       echo "❌ 잘못된 선택입니다."
@@ -211,7 +217,11 @@ echo "============================================"
 echo ""
 echo "  채팅 시작:    ./llm-chat.sh"
 echo "  1M 컨텍스트:  ./llm-chat.sh 1m"
-echo "  API 서버:     ./llm-server.sh"
+if [ -n "$SERVER_ARG" ]; then
+  echo "  API 서버:     ./llm-server.sh $SERVER_ARG"
+else
+  echo "  API 서버:     ./llm-server.sh"
+fi
 echo "  상태 확인:    ./llm-chat.sh status"
 echo ""
 echo "  Alias 설정 (선택):"
