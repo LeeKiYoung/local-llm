@@ -12,17 +12,39 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 | 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
 | **Qwen3.5-35B-A3B** (기본) | `./llm-server.sh 1m` | ~20GB | 103 tok/s | 한국어+코딩 올라운더, Thinking 모드, 1M 컨텍스트 |
-| **SuperGemma4-26B** | `./llm-server.sh supergemma4` | ~15GB | 46 tok/s | 무검열, 툴콜 강화, 128K 컨텍스트 |
+| **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
+| **SuperGemma4-26B abliterated-multimodal** | `./llm-server.sh supergemma4` | ~15GB | ~49 tok/s | 무검열(가중치 조작), 이미지+텍스트 입력 지원 |
 
 두 모델 동시 로드는 불가 (메모리 초과). 서버 재시작으로 전환.
 
 > **모델별 지원 기능**
 >
-> | 기능 | Qwen3.5 | SuperGemma4 |
-> |------|:-------:|:-----------:|
-> | 컨텍스트 프로필 (1m/262k) | ✅ | ❌ (128K 고정) |
-> | Thinking 모드 (`enable_thinking`) | ✅ | ❌ |
-> | 대화형 채팅 (`llm-chat.sh`) | ✅ | ❌ |
+> | 기능 | Qwen3.5 | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
+> |------|:-------:|:------------------------:|:---------------------------------:|
+> | 컨텍스트 프로필 (1m/262k) | ✅ | ❌ (128K 고정) | ❌ (256K 고정) |
+> | Thinking 모드 (`enable_thinking`) | ✅ | ❌ | ❌ |
+> | 대화형 채팅 (`llm-chat.sh`) | ✅ | ❌ | ❌ |
+> | 이미지 입력 (멀티모달) | ❌ | ❌ | ✅ |
+
+### SuperGemma4 두 variant 비교
+
+같은 `SuperGemma4-26B` 계열이지만 목적이 다름.
+
+| 항목 | `uncensored-mlx-4bit-v2` | `abliterated-multimodal-mlx-4bit` |
+|------|:------------------------:|:---------------------------------:|
+| **검열 해제 방식** | Uncensored (파인튜닝) | Abliterated (가중치 벡터 제거) |
+| **멀티모달** | ❌ 텍스트 전용 | ✅ 이미지+텍스트 |
+| **서버 라이브러리** | `mlx_lm` | `mlx_vlm` |
+| **디스크 용량** | ~13GB | ~15GB |
+| **생성 속도** | 46.2 tok/s | ~49.5 tok/s |
+| **한국어/코드 강화** | ✅ 파인튜닝으로 향상 | 기본 수준 |
+| **HF 다운로드** | ~6,468 | ~1,422 |
+
+> **검열 해제 방식 차이**
+> - **Uncensored**: 거부 없이 직접 답하도록 데이터로 재학습 → 코드·한국어 성능도 함께 향상
+> - **Abliterated**: 모델 내부의 "거부" 방향 벡터를 수술적으로 제거 → 추가 학습 없이 검열 해제, 능력 향상은 없음
+>
+> **결론**: 이미지 처리가 필요하면 `abliterated-multimodal`, 텍스트 위주 코딩·한국어 작업이면 `uncensored-v2`가 유리.
 
 ---
 
