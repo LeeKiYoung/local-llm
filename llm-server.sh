@@ -16,7 +16,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$SCRIPT_DIR/.venv/bin"
-MODEL="mlx-community/Qwen3.5-35B-A3B-4bit"
+MODEL="Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2"
 PROFILE_DIR="$SCRIPT_DIR/profiles"
 HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
 MODEL_CONFIG=$(find "$HF_CACHE/models--mlx-community--Qwen3.5-35B-A3B-4bit/snapshots" -maxdepth 2 -name "config.json" 2>/dev/null | head -1)
@@ -49,7 +49,7 @@ SERVER_ARGS=()
 for arg in "$@"; do
   case "$arg" in
     supergemma4)
-      MODEL="Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit"
+      MODEL="Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2"
       ;;
     1m|long)
       switch_profile 1m
