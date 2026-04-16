@@ -12,17 +12,69 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 | 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
 | **Qwen3.5-35B-A3B** (기본) | `./llm-server.sh 1m` | ~20GB | 103 tok/s | 한국어+코딩 올라운더, Thinking 모드, 1M 컨텍스트 |
-| **SuperGemma4-26B** | `./llm-server.sh supergemma4` | ~15GB | 46 tok/s | 무검열, 툴콜 강화, 128K 컨텍스트 |
+| **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
+| **SuperGemma4-26B abliterated-multimodal** | `./llm-server.sh supergemma4` | ~15GB | ~49 tok/s | 무검열(가중치 조작), 이미지+텍스트 입력 지원 |
 
 두 모델 동시 로드는 불가 (메모리 초과). 서버 재시작으로 전환.
 
 > **모델별 지원 기능**
 >
-> | 기능 | Qwen3.5 | SuperGemma4 |
-> |------|:-------:|:-----------:|
-> | 컨텍스트 프로필 (1m/262k) | ✅ | ❌ (128K 고정) |
-> | Thinking 모드 (`enable_thinking`) | ✅ | ❌ |
-> | 대화형 채팅 (`llm-chat.sh`) | ✅ | ❌ |
+> | 기능 | Qwen3.5 | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
+> |------|:-------:|:------------------------:|:---------------------------------:|
+> | 컨텍스트 프로필 (1m/262k) | ✅ | ❌ (128K 고정) | ❌ (256K 고정) |
+> | Thinking 모드 (`enable_thinking`) | ✅ | ❌ | ❌ |
+> | 대화형 채팅 (`llm-chat.sh`) | ✅ | ❌ | ❌ |
+> | 이미지 입력 (멀티모달) | ❌ | ❌ | ✅ |
+
+### SuperGemma4 모델 라인업
+
+Jiunsong이 배포한 SuperGemma4 전체 variant. 런타임·용도에 맞게 선택.
+
+| 모델 | 파라미터 | 포맷 | 런타임 | 용량 | 멀티모달 | 검열 해제 방식 |
+|------|:-------:|------|--------|-----:|:-------:|:------------:|
+| `uncensored-mlx-4bit-v2` | 26B | MLX 4bit | `mlx_lm` | ~13GB | ❌ | Uncensored (파인튜닝) |
+| `abliterated-multimodal-mlx-4bit` | 26B | MLX 4bit | `mlx_vlm` | ~15GB | ✅ | Abliterated (가중치 벡터 제거) |
+| `uncensored-gguf-v2` (Ollama) | 26B | GGUF Q4_K_M | llama.cpp / Ollama | ~17GB | ❌ | Uncensored (파인튜닝) |
+| `SuperGemma4-31b-abliterated-mlx-4bit` | 31B | MLX 4bit | `mlx_lm` | ~17.3GB | ❌ | Abliterated |
+| `SuperGemma4-31b-abliterated-GGUF` | 31B | GGUF Q4_K_M | llama.cpp / Ollama | ~18.7GB | ❌ | Abliterated |
+
+#### 26B variant 비교 (MLX)
+
+같은 26B 계열이지만 목적이 다름.
+
+| 항목 | `uncensored-mlx-4bit-v2` | `abliterated-multimodal-mlx-4bit` |
+|------|:------------------------:|:---------------------------------:|
+| **검열 해제 방식** | Uncensored (파인튜닝) | Abliterated (가중치 벡터 제거) |
+| **멀티모달** | ❌ 텍스트 전용 | ✅ 이미지+텍스트 |
+| **서버 라이브러리** | `mlx_lm` | `mlx_vlm` |
+| **디스크 용량** | ~13GB | ~15GB |
+| **생성 속도** | 46.2 tok/s | ~49.5 tok/s |
+| **한국어/코드 강화** | ✅ 파인튜닝으로 향상 | 기본 수준 |
+| **HF 다운로드** | ~6,468 | ~1,422 |
+
+> **검열 해제 방식 차이**
+> - **Uncensored**: 거부 없이 직접 답하도록 데이터로 재학습 → 코드·한국어 성능도 함께 향상
+> - **Abliterated**: 모델 내부의 "거부" 방향 벡터를 수술적으로 제거 → 추가 학습 없이 검열 해제, 능력 향상은 없음
+
+#### 31B 모델
+
+26B 대비 파라미터 5B 증가. 텍스트 전용, Abliterated 방식.
+
+| 항목 | MLX 4bit | GGUF Q4_K_M |
+|------|:--------:|:-----------:|
+| **런타임** | `mlx_lm` (Apple Silicon) | llama.cpp / Ollama |
+| **용량** | ~17.3GB | ~18.7GB |
+| **생성 속도 (참고)** | 미측정 | - |
+| **멀티모달** | ❌ | ❌ |
+| **HF** | [링크](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-mlx-4bit) | [링크](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-GGUF) |
+
+> 31B는 26B uncensored-v2 대비 파인튜닝 없이 Abliterated만 적용 — 코드·한국어 강화 효과는 없음. 순수 파라미터 증가에 따른 베이스 성능 향상이 목적.
+
+**결론**
+- 이미지 처리 필요 → `abliterated-multimodal` (26B MLX, `mlx_vlm`)
+- 텍스트, 코딩·한국어 위주 → `uncensored-v2` (26B MLX, `mlx_lm`)
+- llama.cpp / Ollama 선호 → `uncensored-gguf-v2` (26B, 89.4 tok/s)
+- 더 큰 모델 원할 때 → `31b-abliterated` (MLX or GGUF, ~17-19GB)
 
 ---
 
@@ -624,8 +676,12 @@ llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B  # 두 모델 비교
 - [Qwen3.5 공식 GitHub](https://github.com/QwenLM/Qwen3.5)
 - [Qwen3.5 로컬 가이드 (Unsloth)](https://unsloth.ai/docs/models/qwen3.5)
 - [Unsloth GGUF Benchmarks](https://unsloth.ai/docs/models/qwen3.5/gguf-benchmarks)
-- [SuperGemma4 26B MLX 4bit](https://huggingface.co/Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit)
-- [SuperGemma4 26B GGUF](https://huggingface.co/Jiunsong/supergemma4-26b-uncensored-gguf-v2)
+- [SuperGemma4 26B uncensored MLX 4bit (v2)](https://huggingface.co/Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2)
+- [SuperGemma4 26B abliterated multimodal MLX 4bit](https://huggingface.co/Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit)
+- [SuperGemma4 26B uncensored GGUF v2](https://huggingface.co/Jiunsong/supergemma4-26b-uncensored-gguf-v2)
+- [SuperGemma4 26B uncensored GGUF v2 (Ollama)](https://ollama.com/0xIbra/supergemma4-26b-uncensored-gguf-v2)
+- [SuperGemma4 31B abliterated MLX 4bit](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-mlx-4bit)
+- [SuperGemma4 31B abliterated GGUF](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-GGUF)
 - [Gemma 4 공식 블로그 (Google)](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/)
 - [TurboQuant (Google Research)](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/)
 - [Gemma 4 on Ollama](https://ollama.com/library/gemma4)
