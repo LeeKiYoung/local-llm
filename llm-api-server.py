@@ -1,10 +1,11 @@
 """
 커스텀 LLM API 서버
-FastAPI + mlx_lm Python API 직접 호출
+FastAPI + mlx_vlm Python API 직접 호출
 
 특징:
 - OpenAI API 호환 (/v1/chat/completions, /v1/models)
-- 요청별 enable_thinking 제어
+- 멀티모달 이미지 처리 (base64 data URI, HTTP URL)
+- 요청별 enable_thinking / preserve_thinking 제어
 - 요청 완료 후 KV 캐시 자동 해제
 - 내장 JSONL 로깅
 """
@@ -22,19 +23,25 @@ import mlx.core as mx
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from mlx_lm import load, stream_generate
-from mlx_lm.sample_utils import make_sampler
+import base64
+import io
+from PIL import Image
+from mlx_vlm import load, generate, stream_generate
+from mlx_vlm.prompt_utils import apply_chat_template
+
+# 압축 폭탄(decompression bomb) 방지 — 50MP 이상 이미지 거부 (PIL 기본값 약 178MP)
+Image.MAX_IMAGE_PIXELS = 50_000_000
 
 # ── 글로벌 ────────────────────────────────────────
 app = FastAPI()
 model = None
-tokenizer = None
+processor = None
 model_id = ""
 gpu_semaphore = None
 pending = 0
 MAX_QUEUE = 5
 LOG_DIR = ""
-DEFAULT_THINKING = False
+DEFAULT_THINKING = True
 
 
 # ── 로깅 ─────────────────────────────────────────
@@ -71,6 +78,7 @@ def parse_request(data: dict) -> dict:
         "presence_penalty": data.get("presence_penalty", 0),
         "frequency_penalty": data.get("frequency_penalty", 0),
         "enable_thinking": data.get("enable_thinking", DEFAULT_THINKING),
+        "preserve_thinking": data.get("preserve_thinking", False),
     }
 
 
@@ -81,6 +89,8 @@ def normalize_messages(messages):
         m = {**msg}
 
         # content: 배열 → 문자열 (멀티모달 포맷)
+        # image_url 파트는 extract_images()가 원본 messages에서 직접 읽으므로
+        # 여기서 제거하지 않는다 — normalize 이전에 extract_images() 호출 필요
         content = m.get("content", "")
         if isinstance(content, list):
             parts = [p.get("text", "") for p in content if p.get("type") == "text"]
@@ -108,6 +118,49 @@ def normalize_messages(messages):
     return normalized
 
 
+ALLOWED_URL_SCHEMES = ("http://", "https://")
+MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20MB raw bytes 상한 (압축 폭탄 방지)
+
+
+def extract_images(messages):
+    """OpenAI vision 포맷에서 PIL Image 리스트 추출 (CORE-02, CORE-03)"""
+    images = []
+    for msg in messages:
+        content = msg.get("content", "")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if part.get("type") != "image_url":
+                continue
+            url = part.get("image_url", {}).get("url", "")
+            try:
+                if url.startswith("data:"):
+                    # base64 data URI: "data:image/jpeg;base64,<data>"
+                    header, data = url.split(",", 1)
+                    decoded = base64.b64decode(data)
+                    if len(decoded) > MAX_IMAGE_BYTES:
+                        raise ValueError("이미지 크기 초과 (최대 20MB)")
+                    img = Image.open(io.BytesIO(decoded))
+                elif url.startswith(ALLOWED_URL_SCHEMES):
+                    # HTTP/HTTPS URL만 허용 (SSRF 방지 — file://, ftp://, 내부 IP 등 차단)
+                    import urllib.request
+                    with urllib.request.urlopen(url, timeout=10) as resp:
+                        raw = resp.read(MAX_IMAGE_BYTES + 1)
+                        if len(raw) > MAX_IMAGE_BYTES:
+                            raise ValueError("원격 이미지 크기 초과 (최대 20MB)")
+                        img = Image.open(io.BytesIO(raw))
+                else:
+                    raise ValueError(f"허용되지 않는 URL 스킴: {url[:80]}")
+                # 최대 1120px 리사이즈 — 비율 유지 (OOM 방지, CORE-03)
+                img.thumbnail((1120, 1120))
+                images.append(img.convert("RGB"))
+            except ValueError:
+                raise
+            except Exception:
+                raise ValueError(f"이미지 디코딩 실패: {url[:80]}")
+    return images
+
+
 def get_prompt_preview(messages):
     if not messages:
         return ""
@@ -117,6 +170,12 @@ def get_prompt_preview(messages):
     if isinstance(content, list):
         return str(content)[:200]
     return ""
+
+
+def strip_thinking(text):
+    """<think>...</think> 블록 제거 — preserve_thinking=False일 때만 호출 (CORE-06)"""
+    import re
+    return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
 
 
 # ── 응답 생성 ─────────────────────────────────────
@@ -155,70 +214,67 @@ def make_chunk(req_id, model_name, delta, finish_reason=None):
 
 # ── 추론 ─────────────────────────────────────────
 def run_inference(params):
+    # _images가 사전 검증에서 이미 추출된 경우 재사용 (이중 fetch 방지, WR-02)
+    images = params.get("_images") if "_images" in params else extract_images(params["messages"])
     messages = normalize_messages(params["messages"])
-    # Build template kwargs — only pass enable_thinking if the tokenizer's template supports it
-    tmpl_kwargs = {}
-    if params["enable_thinking"] and getattr(tokenizer, "chat_template", "") and "enable_thinking" in tokenizer.chat_template:
-        tmpl_kwargs["enable_thinking"] = True
-    prompt = tokenizer.apply_chat_template(
+
+    # apply_chat_template은 processor의 메서드가 아닌 독립 함수 (per D-12, RESEARCH Pattern 2)
+    formatted = apply_chat_template(
+        processor,
+        model.config,
         messages,
-        add_generation_prompt=True,
-        tokenize=False,
-        **tmpl_kwargs,
+        num_images=len(images),
+        chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
     )
 
-    sampler = make_sampler(
+    # mlx_vlm.generate()는 sampler 오브젝트 불필요 — temp/top_p 직접 전달 (per RESEARCH Pitfall 2)
+    result = generate(
+        model,
+        processor,
+        formatted,
+        image=images if images else None,   # 이미지 없을 때 빈 리스트 아닌 None (per RESEARCH)
+        max_tokens=params["max_tokens"],
         temp=params["temperature"],
         top_p=params["top_p"],
     )
 
-    full_text = ""
-    prompt_tokens = 0
-    completion_tokens = 0
-    finish_reason = "stop"
+    full_text = result.text
+    prompt_tokens = result.prompt_tokens
+    completion_tokens = result.generation_tokens
+    # finish_reason 방어 처리 (GenerationResult에 필드 없을 수 있음, per RESEARCH Pitfall 3)
+    finish_reason = getattr(result, "finish_reason", None)
+    if finish_reason is None:
+        finish_reason = "length" if completion_tokens >= params["max_tokens"] else "stop"
 
-    for response in stream_generate(
-        model,
-        tokenizer,
-        prompt=prompt,
-        max_tokens=params["max_tokens"],
-        sampler=sampler,
-    ):
-        full_text += response.text
-        prompt_tokens = response.prompt_tokens
-        completion_tokens = response.generation_tokens
-
-        if response.finish_reason == "length":
-            finish_reason = "length"
+    # preserve_thinking=False일 때만 <think> 블록 제거 (per D-19)
+    if not params.get("preserve_thinking"):
+        full_text = strip_thinking(full_text)
 
     mx.clear_cache()
     return full_text, finish_reason, prompt_tokens, completion_tokens
 
 
 def run_inference_streaming(params):
+    # _images가 사전 검증에서 이미 추출된 경우 재사용 (이중 fetch 방지, WR-02)
+    images = params.get("_images") if "_images" in params else extract_images(params["messages"])
     messages = normalize_messages(params["messages"])
-    # Build template kwargs — only pass enable_thinking if the tokenizer's template supports it
-    tmpl_kwargs = {}
-    if params["enable_thinking"] and getattr(tokenizer, "chat_template", "") and "enable_thinking" in tokenizer.chat_template:
-        tmpl_kwargs["enable_thinking"] = True
-    prompt = tokenizer.apply_chat_template(
-        messages,
-        add_generation_prompt=True,
-        tokenize=False,
-        **tmpl_kwargs,
-    )
 
-    sampler = make_sampler(
-        temp=params["temperature"],
-        top_p=params["top_p"],
+    formatted = apply_chat_template(
+        processor,
+        model.config,
+        messages,
+        num_images=len(images),
+        chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
     )
 
     for response in stream_generate(
         model,
-        tokenizer,
-        prompt=prompt,
+        processor,
+        formatted,
+        image=images if images else None,
         max_tokens=params["max_tokens"],
-        sampler=sampler,
+        temp=params["temperature"],
+        top_p=params["top_p"],
     ):
         yield response
 
@@ -256,14 +312,30 @@ async def chat_completions(request: Request):
     start = time.time()
     last_msg = get_prompt_preview(params["messages"])
 
+    # 이미지 파싱 사전 검증 (디코딩 실패 시 즉시 400 반환, per D-09)
+    # 결과를 params["_images"]에 저장해 run_inference/run_inference_streaming에서 재사용 (이중 fetch 방지)
+    try:
+        params["_images"] = extract_images(params["messages"])
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": str(e), "type": "invalid_request_error"}},
+        )
+
     if params["stream"]:
+        # WR-03: 스트리밍에서 preserve_thinking=False는 SSE 청크에 적용되지 않음
+        # (이미 yield된 청크는 수정 불가). 클라이언트에 <think> 블록이 노출될 수 있음.
+        # 완전한 필터링이 필요하면 stream=false 사용 권장.
+        if not params.get("preserve_thinking") and params.get("enable_thinking"):
+            print(f"  [WARN] {req_id}: stream=true + preserve_thinking=false — "
+                  "<think> 블록이 SSE 청크에 포함됩니다. 비스트리밍 사용 권장.")
         return _stream_response(req_id, params, ip, start, last_msg)
 
     # 비스트리밍
     pending += 1
     try:
         async with gpu_semaphore:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             text, finish_reason, p_tokens, c_tokens = await loop.run_in_executor(
                 None, partial(run_inference, params)
             )
@@ -308,19 +380,25 @@ def _stream_response(req_id, params, ip, start, last_msg):
 
                 # 동기 제너레이터 → async Queue 브릿지 (진짜 토큰별 스트리밍)
                 queue = asyncio.Queue()
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
 
                 def _produce():
+                    # 성공: _SENTINEL으로 종료, 실패: 예외 객체를 큐에 전달 (상호 배타적 터미네이터)
                     try:
                         for response in run_inference_streaming(params):
                             loop.call_soon_threadsafe(queue.put_nowait, response)
-                    finally:
                         loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+                    except Exception as e:
+                        # 예외를 삼키지 않고 소비 측에 전파 (WR-04)
+                        loop.call_soon_threadsafe(queue.put_nowait, e)
 
                 loop.run_in_executor(None, _produce)
 
                 while True:
                     item = await queue.get()
+                    if isinstance(item, Exception):
+                        # _produce에서 전파된 추론 오류 — 클라이언트에 500 반환
+                        raise item
                     if item is _SENTINEL:
                         break
 
@@ -328,12 +406,19 @@ def _stream_response(req_id, params, ip, start, last_msg):
                     prompt_tokens = item.prompt_tokens
                     completion_tokens = item.generation_tokens
 
-                    if item.finish_reason == "length":
+                    # finish_reason 방어 처리 (GenerationResult 필드 미보장, per RESEARCH Pitfall 3)
+                    item_finish = getattr(item, "finish_reason", None)
+                    if item_finish == "length" or completion_tokens >= params["max_tokens"]:
                         finish_reason = "length"
 
                     yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': item.text}))}\n\n"
 
                 mx.clear_cache()
+
+                # preserve_thinking=False일 때 full_text에서 <think> 블록 제거 (per D-19)
+                # 주의: SSE 청크는 이미 yield됐으므로 content_preview 로그에만 영향 (알려진 제한)
+                if not params.get("preserve_thinking"):
+                    full_text = strip_thinking(full_text)
 
                 # 최종 청크
                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {}, finish_reason))}\n\n"
@@ -364,14 +449,15 @@ def _stream_response(req_id, params, ip, start, last_msg):
 
 # ── 메인 ─────────────────────────────────────────
 def main():
-    global model, tokenizer, model_id, gpu_semaphore, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING
+    global model, processor, model_id, gpu_semaphore, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING
 
     parser = argparse.ArgumentParser(description="Local LLM API Server")
-    parser.add_argument("--model", type=str, default="mlx-community/Qwen3.5-35B-A3B-4bit")
+    parser.add_argument("--model", type=str, default="mlx-community/Qwen3.6-27B-6bit")
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--max-queue", type=int, default=5)
-    parser.add_argument("--think", action="store_true", help="기본 Thinking ON (요청별 override 가능)")
+    parser.add_argument("--think", action=argparse.BooleanOptionalAction, default=True,
+                        help="Thinking ON/OFF (기본값: ON, --no-think으로 비활성화)")
     args = parser.parse_args()
 
     model_id = args.model
@@ -382,7 +468,7 @@ def main():
     os.makedirs(LOG_DIR, exist_ok=True)
 
     print(f"📥 모델 로딩: {model_id}")
-    model, tokenizer = load(model_id)
+    model, processor = load(model_id)
     print(f"✅ 모델 로드 완료")
     print()
     print(f"🌐 API 서버: http://{args.host}:{args.port}")

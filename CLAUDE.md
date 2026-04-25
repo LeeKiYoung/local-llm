@@ -3,7 +3,7 @@
 
 **local-llm**
 
-Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실행하는 프로젝트. Qwen3.5-35B(텍스트 특화)와 SuperGemma4-26B(멀티모달)를 서버 시작 시 선택해 실행하며, openclaw 및 OpenAI SDK 호환 클라이언트에 로컬 추론 API를 제공한다.
+Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실행하는 프로젝트. Qwen3.6-27B(기본 멀티모달 VLM)와 SuperGemma4-26B(보조 무검열 모델)를 서버 시작 시 선택해 실행하며, openclaw 및 OpenAI SDK 호환 클라이언트에 로컬 추론 API를 제공한다.
 
 **Core Value:** openclaw 등 OpenAI SDK 호환 클라이언트가 이미지를 포함한 메시지를 보내면 로컬에서 완전히 처리되어 응답이 돌아온다.
 
@@ -25,17 +25,17 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - Python 3.11.14 (Apple Silicon specific - requires 3.10+)
 - Virtual environment: `.venv/` (isolated dependency management)
 - pip - Python package management
-- Lockfile: No explicit lock file (setup.sh pins mlx-lm and fastapi versions)
+- Lockfile: No explicit lock file (setup.sh pins mlx-vlm and fastapi versions)
 ## Frameworks
 - **MLX** 0.31.1 - Apple Silicon native ML framework (GPU acceleration via Metal)
 - **FastAPI** 0.135.2 - Async HTTP API server for OpenAI-compatible endpoints
 - **Uvicorn** 0.42.0 - ASGI server runner for FastAPI
 - **pytest** 9.0.2 - Unit testing framework
 - **NumPy** 2.4.3 - Numerical computing (MLX dependency)
-- **transformers** 5.0.0+ - Model loading and tokenization (mlx-lm dependency)
-- **sentencepiece** - Tokenization library (mlx-lm dependency)
+- **transformers** 5.0.0+ - Model loading and tokenization (mlx-vlm dependency)
+- **sentencepiece** - Tokenization library (mlx-vlm dependency)
 ## Key Dependencies
-- mlx-lm 0.31.1 - Provides load(), generate(), and stream_generate() functions for model inference
+- mlx-vlm 0.4.4 - Provides load(), generate(), and stream_generate() functions for VLM inference (multimodal)
 - mlx 0.31.1 - Core computation engine, mx.clear_cache() for KV cache management
 - fastapi 0.135.2 - HTTP API framework for /v1/chat/completions and /v1/models endpoints
 - transformers 5.0.0+ - Tokenizer.apply_chat_template() for prompt formatting with enable_thinking support
@@ -45,8 +45,8 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - numpy 2.4.3 - Array operations (MLX dependency)
 ## Configuration
 - `HF_HOME` - Hugging Face cache directory (default: `~/.cache/huggingface`)
-- `profiles/config-262k.json` - Default Qwen3.5 config with 262K token context window
-- `profiles/config-1m.json` - Extended context (1M tokens) with YaRN rope scaling
+- `profiles/config-qwen36-27b-262k.json` - Default Qwen3.6-27B config with 262K token context window
+- `profiles/config-qwen36-27b-1m.json` - Extended context (1M tokens) with YaRN rope scaling for Qwen3.6-27B
 - `setup.sh` - Automated environment setup (Python check, venv creation, pip install)
 - `llm-server.sh` - API server launcher with profile switching and thinking mode control
 - `llm-chat.sh` - Interactive CLI chat launcher with context profile support
@@ -64,9 +64,9 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - Format: JSONL (one JSON object per line, date-partitioned)
 - Contents: Request IP, thinking mode, token counts, duration, content preview
 - Filename: `YYYY-MM-DD.jsonl` (new file per calendar day)
-- Location: `~/.cache/huggingface/hub/models--mlx-community--Qwen3.5-35B-A3B-4bit/`
-- Size: ~19-20GB (quantized to 4-bit)
-- Auto-downloaded on first run via mlx_lm
+- Location: `~/.cache/huggingface/hub/models--mlx-community--Qwen3.6-27B-6bit/`
+- Size: ~22.8GB (quantized to 6-bit)
+- Auto-downloaded on first run via mlx-vlm
 <!-- GSD:stack-end -->
 
 <!-- GSD:conventions-start source:CONVENTIONS.md -->
@@ -79,7 +79,7 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - Snake_case for all functions: `parse_request()`, `normalize_messages()`, `strip_thinking()`, `get_log_file()`, `log_entry()`
 - Descriptive verbs: `make_completion_response()`, `make_chunk()`, `run_inference()`, `run_inference_streaming()`
 - Private/internal functions prefixed with underscore: `_stream_response()`, `_produce()`
-- Snake_case for all variables: `model`, `tokenizer`, `model_id`, `gpu_semaphore`, `pending`, `req_id`, `req_data`, `resp_data`
+- Snake_case for all variables: `model`, `processor`, `model_id`, `gpu_semaphore`, `pending`, `req_id`, `req_data`, `resp_data`
 - All-caps for module-level constants: `MAX_QUEUE`, `LOG_DIR`, `DEFAULT_THINKING`, `BACKEND_PORT`, `PROXY_PORT`, `_SENTINEL`
 - English names (no Korean) for variables, except in docstrings and comments
 - No explicit type hints in most function signatures; only on critical functions: `parse_request(data: dict) -> dict`
@@ -133,7 +133,7 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - JSON responses wrapped in FastAPI response classes: `JSONResponse()`, `StreamingResponse()`
 ## Module Design
 - No explicit `__all__` declarations; top-level functions directly callable
-- Global variables shared across module: `app`, `model`, `tokenizer`, `model_id`, `gpu_semaphore`, `pending`
+- Global variables shared across module: `app`, `model`, `processor`, `model_id`, `gpu_semaphore`, `pending`
 - Module-as-singleton pattern for FastAPI `app` instance
 - Constants and globals at module top (lines 28-37 in llm-api-server.py)
 - Helper functions grouped by purpose: logging, parsing, response building, inference
@@ -145,7 +145,7 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - Hard-coded defaults: `MAX_QUEUE = 5`, `DEFAULT_THINKING = False`
 ## String Handling
 ## Dependency Injection & Globals
-- Global `model`, `tokenizer`, `gpu_semaphore` initialized at startup
+- Global `model`, `processor`, `gpu_semaphore` initialized at startup
 - Modified at runtime by main() function
 - Accessed directly by endpoint handlers
 - Trade-off: Simple single-model setup but limits testing/concurrency
@@ -170,8 +170,8 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - Used by: External clients via HTTP
 - Purpose: Model loading, prompt formatting, token generation
 - Location: `llm-api-server.py` lines 156-217 (`run_inference`, `run_inference_streaming`)
-- Contains: MLX model/tokenizer integration, sampler configuration, streaming wrapper
-- Depends on: MLX core library (`mlx.core`, `mlx_lm`)
+- Contains: MLX model/processor integration, sampling parameters, streaming wrapper
+- Depends on: MLX core library (`mlx.core`, `mlx_vlm`)
 - Used by: API layer for generating responses
 - Purpose: Normalize OpenAI format to model template format
 - Location: `llm-api-server.py` lines 60-119 (`parse_request`, `normalize_messages`, `get_prompt_preview`)
@@ -189,7 +189,7 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - Depends on: Backend API server
 - Used by: External clients (alternative to direct API access)
 ## Data Flow
-- Global model/tokenizer loaded once at startup via `mlx_lm.load()`
+- Global model/processor loaded once at startup via `mlx_vlm.load()`
 - Per-request state (accumulated text, token counts) maintained in handler scope
 - Streaming: state accumulated in `event_generator` closure across queue iterations
 - GPU concurrency: `gpu_semaphore` (Semaphore(1)) ensures single active inference
@@ -202,8 +202,8 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - Examples: `normalize_messages()` (line 77)
 - Pattern: Message-by-message conversion with type checking and JSON parsing
 - Purpose: Decouple sampling parameters from inference
-- Examples: `make_sampler()` from mlx_lm.sample_utils (line 166, 203)
-- Pattern: Factory function accepting temperature, top_p; returns sampler object passed to stream_generate
+- Examples: temperature, top_p passed directly to `mlx_vlm.generate()` / `mlx_vlm.stream_generate()`
+- Pattern: Parameters passed directly to mlx_vlm API (no separate sampler object required)
 ## Entry Points
 - Location: `llm-api-server.py` line 29 (global `app`)
 - Triggers: uvicorn.run() at startup (line 391)

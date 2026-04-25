@@ -1,5 +1,5 @@
 #!/bin/bash
-# Qwen3.5-35B-A3B / SuperGemma4 API 서버 실행 스크립트
+# Qwen3.6-27B / SuperGemma4 API 서버 실행 스크립트
 #
 # 사용법:
 #   ./llm-server.sh              # 기본 (Thinking OFF)
@@ -7,6 +7,7 @@
 #   ./llm-server.sh --think      # Thinking ON (수학/코딩 정확도 향상)
 #   ./llm-server.sh 1m --think   # 1M + Thinking ON
 #   ./llm-server.sh 262k 9090    # 포트 지정
+#   ./llm-server.sh qwen36       # Qwen3.6-27B 명시적 선택
 #   ./llm-server.sh supergemma4    # SuperGemma4 모델
 #   ./llm-server.sh supergemma4 --think  # SuperGemma4 + Thinking (모델이 지원하는 경우만)
 #
@@ -16,21 +17,62 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$SCRIPT_DIR/.venv/bin"
-MODEL="Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2"
+MODEL="mlx-community/Qwen3.6-27B-6bit"
 PROFILE_DIR="$SCRIPT_DIR/profiles"
 HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
-MODEL_CONFIG=$(find "$HF_CACHE/models--mlx-community--Qwen3.5-35B-A3B-4bit/snapshots" -maxdepth 2 -name "config.json" 2>/dev/null | head -1)
+MODEL_CONFIG=$(find "$HF_CACHE/models--mlx-community--Qwen3.6-27B-6bit/snapshots" -maxdepth 2 -name "config.json" 2>/dev/null | head -1)
 PORT=8080
 USE_THINK=false
 
 switch_profile() {
+  if [ -z "$MODEL_CONFIG" ]; then
+    echo "⚠️  모델 캐시를 찾을 수 없습니다. 먼저 모델을 다운로드하세요."
+    return 1
+  fi
+  local BACKUP="${MODEL_CONFIG}.original"
+  # 원본 백업이 없으면 현재 파일을 백업 (심링크 대상 파일을 복사)
+  if [ ! -f "$BACKUP" ]; then
+    cp -L "$MODEL_CONFIG" "$BACKUP"
+  fi
   case "$1" in
     262k)
-      cp "$PROFILE_DIR/config-262k.json" "$MODEL_CONFIG"
+      # 원본 복원 후 262K 설정만 덮어쓰기
+      "$VENV/python" - "$BACKUP" "$MODEL_CONFIG" <<'EOF'
+import json, sys
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f: cfg = json.load(f)
+tc = cfg.setdefault("text_config", {})
+rp = tc.setdefault("rope_parameters", {})
+rp.update({"rope_type": "default", "type": "default"})
+rp.pop("factor", None)
+rp.pop("original_max_position_embeddings", None)
+tc["max_position_embeddings"] = 262144
+cfg["max_position_embeddings"] = 262144
+with open(dst, "w") as f: json.dump(cfg, f, indent=2)
+EOF
       echo "✅ 262K 컨텍스트 (기본) 적용"
       ;;
     1m)
-      cp "$PROFILE_DIR/config-1m.json" "$MODEL_CONFIG"
+      # 원본 복원 후 1M YaRN 설정만 덮어쓰기
+      "$VENV/python" - "$BACKUP" "$MODEL_CONFIG" <<'EOF'
+import json, sys
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f: cfg = json.load(f)
+tc = cfg.setdefault("text_config", {})
+rp = tc.setdefault("rope_parameters", {})
+rp.update({
+    "rope_type": "yarn", "type": "yarn",
+    "factor": 4.0,
+    "original_max_position_embeddings": 262144,
+    "mrope_interleaved": True,
+    "mrope_section": [11, 11, 10],
+    "partial_rotary_factor": 0.25,
+    "rope_theta": 10000000
+})
+tc["max_position_embeddings"] = 1048576
+cfg["max_position_embeddings"] = 1048576
+with open(dst, "w") as f: json.dump(cfg, f, indent=2)
+EOF
       echo "✅ 1M 컨텍스트 (YaRN) 적용"
       ;;
   esac
@@ -49,7 +91,10 @@ SERVER_ARGS=()
 for arg in "$@"; do
   case "$arg" in
     supergemma4)
-      MODEL="Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2"
+      MODEL="Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit"
+      ;;
+    qwen36)
+      MODEL="mlx-community/Qwen3.6-27B-6bit"
       ;;
     1m|long)
       switch_profile 1m
