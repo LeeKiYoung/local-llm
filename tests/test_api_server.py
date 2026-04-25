@@ -384,10 +384,10 @@ class TestStripThinking:
 
 # ── preserve_thinking / DEFAULT_THINKING 통합 테스트 ─────────────────────────
 class TestPreserveThinking:
-    def test_default_thinking_is_true_at_module_level(self):
-        """CORE-05: DEFAULT_THINKING 모듈 레벨 기본값이 True이다
-        (autouse fixture가 False로 override하기 전의 실제 모듈 초기값 검증)"""
-        assert _MODULE_DEFAULT_THINKING_AT_LOAD is True
+    def test_default_thinking_is_false_at_module_level(self):
+        """CORE-05: DEFAULT_THINKING 모듈 레벨 기본값이 False이다
+        (autouse fixture가 override하기 전의 실제 모듈 초기값 검증)"""
+        assert _MODULE_DEFAULT_THINKING_AT_LOAD is False
 
     def test_preserve_thinking_false_strips_think_block(self, client):
         """CORE-06: preserve_thinking=False(기본)일 때 응답 content에서 <think> 블록이 제거된다"""
