@@ -7,11 +7,13 @@
 Apple Silicon Mac에서 로컬 LLM을 OpenAI 호환 API 서버로 실행하는 프로젝트.
 openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히 로컬에서 추론합니다.
 
+---
+
 ## 지원 모델
 
 | 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
-| **Qwen3.6-27B-6bit** (기본) | `./llm-server.sh` | ~23GB | 미측정 | 멀티모달(이미지), Thinking 기본 ON, preserve_thinking 지원, mlx-vlm 런타임 |
+| **Qwen3.6-27B-6bit** (기본) | `./llm-server.sh` | ~23GB | ~45~55 tok/s³ | 멀티모달(이미지), Thinking 기본 ON, preserve_thinking 지원, mlx-vlm 런타임 |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
 | **SuperGemma4-26B abliterated-multimodal** | 직접 모델 ID 지정¹ | ~15GB | ~49 tok/s | 무검열(EGA), 이미지+텍스트 입력 지원 |
 
@@ -19,83 +21,17 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 
 > ¹ abliterated-multimodal은 `python llm-api-server.py --model Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit`로 직접 실행.
 
-> **모델별 지원 기능**
->
-> | 기능 | Qwen3.6-27B (기본) | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
-> |------|:-----------------:|:------------------------:|:---------------------------------:|
-> | 컨텍스트 프로필 (1m/262k) | ✅ | ❌ (128K 고정) | ❌ (256K 고정) |
-> | Thinking 모드 (`enable_thinking`) | ✅ (기본 ON) | ❌ | ❌ |
-> | 대화형 채팅 (`llm-chat.sh`) | ✅ | ❌ | ❌ |
-> | 이미지 입력 (멀티모달) | ✅ | ❌ | ✅ |
-> | 영상 입력 | ❌ | ❌ | ❌ |
+> ³ M5 Pro 64GB 추정치 (메모리 대역폭 153 GB/s 기반), 실측 예정.
 
-### SuperGemma4 모델 라인업
+### 모델별 지원 기능
 
-Jiunsong이 배포한 SuperGemma4 전체 variant. 런타임·용도에 맞게 선택.
-
-| 모델 | 파라미터 | 포맷 | 런타임 | 용량 | 멀티모달 | 검열 해제 방식 |
-|------|:-------:|------|--------|-----:|:-------:|:------------:|
-| `uncensored-mlx-4bit-v2` | 26B MoE | MLX 4bit | `mlx_lm` | ~13GB | ❌ | Uncensored (파인튜닝), 기본값 |
-| `abliterated-multimodal-mlx-4bit` | 26B MoE | MLX 4bit | `mlx_vlm` | ~15GB | ✅ | Abliterated+EGA, 2.2K 다운로드 |
-| `abliterated-multimodal-mlx-8bit` | 26B MoE | MLX 8bit | `mlx_vlm` | ~24GB | ✅ | 위와 동일, 더 높은 품질 |
-| `uncensored-gguf-v2` (Ollama) | 26B MoE | GGUF Q4_K_M | llama.cpp / Ollama | ~17GB | ❌ | Uncensored (파인튜닝), 42K+ 다운로드 |
-| `SuperGemma4-31b-abliterated-mlx-4bit` | 31B **Dense** | MLX 4bit | `mlx_lm` | ~17.3GB | ❌ | Abliterated, 느림 |
-| `SuperGemma4-31b-abliterated-GGUF` | 31B **Dense** | GGUF Q4_K_M | llama.cpp / Ollama | ~18.7GB | ❌ | Abliterated, 느림 |
-
-#### 26B variant 비교 (MLX)
-
-같은 26B 계열이지만 목적이 다름.
-
-| 항목 | `uncensored-mlx-4bit-v2` | `abliterated-multimodal-mlx-4bit` |
-|------|:------------------------:|:---------------------------------:|
-| **검열 해제 방식** | Uncensored (파인튜닝) | Abliterated (가중치 벡터 제거) |
-| **멀티모달** | ❌ 텍스트 전용 | ✅ 이미지+텍스트 |
-| **서버 라이브러리** | `mlx_lm` | `mlx_vlm` (v0.4.3+, Day-0 지원) |
-| **디스크 용량** | ~13GB | ~15GB |
-| **생성 속도** | 46.2 tok/s | ~49.5 tok/s |
-| **한국어/코드 강화** | ✅ 파인튜닝으로 향상 | 기본 수준 |
-| **HF 다운로드** | ~8,908 | ~2,230 |
-
-> **검열 해제 방식 차이**
-> - **Uncensored**: 거부 없이 직접 답하도록 데이터로 재학습 → 코드·한국어 성능도 함께 향상
-> - **Abliterated**: 모델 내부의 "거부" 방향 벡터를 수술적으로 제거 → 추가 학습 없이 검열 해제, 능력 향상은 없음
->   - Gemma 4 26B는 MoE 구조 특성상 표준 abliteration만으론 거부율 29% 잔존 → **EGA(Expert-Granular Abliteration)** 로 각 전문가(expert)에 개별 적용해 0.7%로 감소
-
-#### uncensored-v2 Quick Bench 성능 (vs Gemma 4 26B IT 기준)
-
-| 카테고리 | Gemma 4 26B IT | SuperGemma4 uncensored-v2 | 향상 |
-|---------|:--------------:|:-------------------------:|:----:|
-| 코드 | 92.3 | 98.6 | +6.3 |
-| 로직/추론 | 86.9 | 95.2 | +8.3 |
-| 한국어 | 90.7 | 95.0 | +4.3 |
-| **전체** | **91.4** | **95.8** | **+4.4** |
-
-v1 대비 v2 개선: tool-call 라우팅 버그 수정, 생성 속도 +8.7% (46.2 tok/s), 채팅 템플릿 중립화.
-
-#### 31B 모델
-
-26B 대비 파라미터 5B 증가. 텍스트 전용, Abliterated 방식.
-
-| 항목 | MLX 4bit | GGUF Q4_K_M |
-|------|:--------:|:-----------:|
-| **런타임** | `mlx_lm` (Apple Silicon) | llama.cpp / Ollama |
-| **용량** | ~17.3GB | ~18.7GB |
-| **생성 속도 (참고)** | MLX 미측정 (RTX 3090 기준 ~30 tok/s) | - |
-| **멀티모달** | ❌ | ❌ |
-| **HF 다운로드** | ~1,302 | - |
-| **HF** | [링크](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-mlx-4bit) | [링크](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-GGUF) |
-
-> 31B는 26B uncensored-v2 대비 파인튜닝 없이 Abliterated만 적용 — 코드·한국어 강화 효과는 없음. Dense 구조라 26B MoE보다 생성 속도가 느림. 순수 파라미터 증가에 따른 베이스 성능 향상이 목적.
-
-**결론**
-- 이미지 처리 필요 → `abliterated-multimodal` (26B MLX, `mlx_vlm` v0.4.3+)
-- 텍스트, 코딩·한국어 위주 → `uncensored-v2` (26B MLX, `mlx_lm`)
-- llama.cpp / Ollama 선호 → `uncensored-gguf-v2` (26B, 89.4 tok/s, 커뮤니티 최다 사용)
-- 더 큰 모델 원할 때 → `31b-abliterated` (MLX or GGUF, ~17-19GB, 단 Dense라 느림)
-
-> **⚠️ 알려진 버그**: Gemma4 베이스 모델의 토큰 반복 붕괴(token repetition collapse) 버그가 [google-deepmind/gemma#622](https://github.com/google-deepmind/gemma/issues/622)로 공식 확인됨. Ollama/LMStudio 환경에서 재현. **MLX 환경에서는 미재현** — serving template 문제로 추정.
-
-> **⚠️ MLX 주의사항**: `--chat-template` 옵션에 파일 경로 문자열을 직접 전달하지 말 것. 경로 문자열이 템플릿 본문 대신 그대로 주입되어 응답이 손상됨. 모델 내부 번들 템플릿을 자동 감지에 맡기는 것이 올바른 방법.
+| 기능 | Qwen3.6-27B (기본) | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
+|------|:-----------------:|:------------------------:|:---------------------------------:|
+| 컨텍스트 프로필 (1m/262k) | ✅ | ❌ (128K 고정) | ❌ (256K 고정) |
+| Thinking 모드 (`enable_thinking`) | ✅ (기본 ON) | ❌ | ❌ |
+| 대화형 채팅 (`llm-chat.sh`) | ✅ | ❌ | ❌ |
+| 이미지 입력 (멀티모달) | ✅ | ❌ | ✅ |
+| 영상 입력 | ❌ | ❌ | ❌ |
 
 ---
 
@@ -212,28 +148,9 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-### 대화형 채팅
-
-```bash
-./llm-chat.sh 1m
-```
-
-```
-✅ 1M 컨텍스트 (YaRN) 적용 완료
-
-🚀 채팅 시작 (종료: Ctrl+C)
-
->> 파이썬으로 피보나치 함수 짜줘
-def fibonacci(n):
-    a, b = 0, 1
-    for _ in range(n):
-        a, b = b, a + b
-    return a
-```
-
 ---
 
-## 사용 모드별 가이드
+## 사용 가이드
 
 ### 1. 대화형 채팅
 
@@ -251,6 +168,21 @@ def fibonacci(n):
 ./llm-chat.sh --system-prompt "한국어로만 답해줘"
 ```
 
+대화 예시:
+
+```
+✅ 1M 컨텍스트 (YaRN) 적용 완료
+
+🚀 채팅 시작 (종료: Ctrl+C)
+
+>> 파이썬으로 피보나치 함수 짜줘
+def fibonacci(n):
+    a, b = 0, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+```
+
 ### 2. API 서버
 
 OpenAI 호환 API 서버. FastAPI + mlx_vlm Python API로 직접 추론.
@@ -258,8 +190,8 @@ OpenAI 호환 API 서버. FastAPI + mlx_vlm Python API로 직접 추론.
 
 ```bash
 # Qwen3.6-27B (기본)
-./llm-server.sh              # 262K 컨텍스트, Thinking OFF (기본)
-./llm-server.sh 1m           # 1M 컨텍스트 (YaRN) ← 주로 이걸 씀
+./llm-server.sh              # 262K 컨텍스트, Thinking ON (기본)
+./llm-server.sh 1m           # 1M 컨텍스트 (YaRN)
 ./llm-server.sh 262k 9090    # 포트 지정
 
 # SuperGemma4
@@ -344,7 +276,7 @@ curl http://localhost:8080/v1/chat/completions \
 | `presence_penalty` | float | 0 | 존재 패널티 (OpenAI 호환용, 모델에 전달되지 않음) |
 | `frequency_penalty` | float | 0 | 빈도 패널티 (OpenAI 호환용, 모델에 전달되지 않음) |
 | `repetition_penalty` | float | null | 반복 패널티 (파싱됨, 현재 모델에 전달되지 않음) |
-| `enable_thinking` | bool | true | Thinking 모드 (기본 ON, Qwen3.6 지원) |
+| `enable_thinking` | bool | true | Thinking 모드 (기본 ON, Qwen3.6-27B 지원) |
 | `preserve_thinking` | bool | false | true 시 `<think>...</think>` 블록 응답에 포함 |
 
 #### 웹 UI 연동
@@ -371,7 +303,7 @@ curl http://<TAILSCALE_IP>:8080/v1/chat/completions ...
 - `asyncio.Semaphore(1)` — GPU 순차 처리, HTTP는 동시 수신
 - 대기 큐 5개 초과 시 429 응답 (OOM 방지)
 
-### 4. 로깅
+### 3. 로깅
 
 서버에 로깅이 **내장**되어 있습니다. 두 모델 모두 동일하게 기록.
 
@@ -403,24 +335,11 @@ cat logs/*.jsonl | jq -r '.ip' | sort | uniq -c | sort -rn
 cat logs/*.jsonl | jq 'select(.duration_ms > 3000)'
 ```
 
-### 3. 벤치마크
-
-### 커뮤니티 벤치마크 공유 (whatcani.run)
-
-[whatcani.run](https://www.whatcani.run/)은 실사용자 실측 LLM 벤치마크 공유 플랫폼. MLX/llama.cpp 런타임 공식 지원.
-
-```bash
-bunx whatcanirun run \
-  --model mlx-community/Qwen3.6-27B-6bit \
-  --runtime mlx \
-  --submit
-```
-
 ---
 
 ## 컨텍스트 프로필 시스템
 
-> SuperGemma4는 128K/256K 고정, 이 시스템 해당 없음.
+> Qwen3.6-27B 전용. SuperGemma4는 128K/256K 고정, 이 시스템 해당 없음.
 
 262K(기본)와 1M(확장) 두 가지 프로필. `config.json` 교체 방식으로 전환.
 
@@ -457,7 +376,7 @@ YaRN(Yet another RoPE extensioN)으로 위치 인코딩을 스케일링.
 
 ## Thinking 모드
 
-> SuperGemma4에서 `enable_thinking`을 보내도 오류는 없지만 무시됩니다. 서버가 자동 감지 처리.
+> Qwen3.6-27B 전용. SuperGemma4에서 `enable_thinking`을 보내도 오류는 없지만 무시됩니다. 서버가 자동 감지 처리.
 
 Qwen3.6-27B는 Thinking 기본 ON (DEFAULT_THINKING=True). `preserve_thinking=true` 요청 시 `<think>...</think>` 블록이 응답에 포함됩니다. 기본값(false)은 thinking 블록을 제거하고 최종 답변만 반환합니다.
 
@@ -478,8 +397,8 @@ Qwen3.6-27B는 Thinking 기본 ON (DEFAULT_THINKING=True). `preserve_thinking=tr
 | 모드 | 방법 | 동작 |
 |------|------|:---:|
 | `llm-chat.sh` (대화형) | 프롬프트에 `/no_think` 추가 | O |
-| `llm-server.sh` (API) | 기본값 Thinking OFF | O |
-| `llm-server.sh --think` (API) | --think 명시 (Thinking ON) | O |
+| `llm-server.sh` (API) | 기본값 Thinking ON | O |
+| `llm-server.sh --no-think` (API) | --no-think 명시 (Thinking OFF) | O |
 | API 요청 `enable_thinking` | **요청별 제어 가능** | **O** |
 | API 요청 `preserve_thinking` | **thinking 블록 포함 여부** | **O** |
 
@@ -517,6 +436,137 @@ Qwen3.6-27B는 Thinking 기본 ON (DEFAULT_THINKING=True). `preserve_thinking=tr
 | 코드 생성 | 1000-2000 |
 | 긴 문서 | 4000+ |
 | Thinking ON | 8000+ |
+
+---
+
+## SuperGemma4 라인업 상세
+
+Jiunsong이 배포한 SuperGemma4 전체 variant. 런타임·용도에 맞게 선택.
+
+| 모델 | 파라미터 | 포맷 | 런타임 | 용량 | 멀티모달 | 검열 해제 방식 |
+|------|:-------:|------|--------|-----:|:-------:|:------------:|
+| `uncensored-mlx-4bit-v2` | 26B MoE | MLX 4bit | `mlx_lm` | ~13GB | ❌ | Uncensored (파인튜닝), 기본값 |
+| `abliterated-multimodal-mlx-4bit` | 26B MoE | MLX 4bit | `mlx_vlm` | ~15GB | ✅ | Abliterated+EGA, 2.2K 다운로드 |
+| `abliterated-multimodal-mlx-8bit` | 26B MoE | MLX 8bit | `mlx_vlm` | ~24GB | ✅ | 위와 동일, 더 높은 품질 |
+| `uncensored-gguf-v2` (Ollama) | 26B MoE | GGUF Q4_K_M | llama.cpp / Ollama | ~17GB | ❌ | Uncensored (파인튜닝), 42K+ 다운로드 |
+| `SuperGemma4-31b-abliterated-mlx-4bit` | 31B **Dense** | MLX 4bit | `mlx_lm` | ~17.3GB | ❌ | Abliterated, 느림 |
+| `SuperGemma4-31b-abliterated-GGUF` | 31B **Dense** | GGUF Q4_K_M | llama.cpp / Ollama | ~18.7GB | ❌ | Abliterated, 느림 |
+
+### 26B variant 비교 (MLX)
+
+같은 26B 계열이지만 목적이 다름.
+
+| 항목 | `uncensored-mlx-4bit-v2` | `abliterated-multimodal-mlx-4bit` |
+|------|:------------------------:|:---------------------------------:|
+| **검열 해제 방식** | Uncensored (파인튜닝) | Abliterated (가중치 벡터 제거) |
+| **멀티모달** | ❌ 텍스트 전용 | ✅ 이미지+텍스트 |
+| **서버 라이브러리** | `mlx_lm` | `mlx_vlm` (v0.4.3+, Day-0 지원) |
+| **디스크 용량** | ~13GB | ~15GB |
+| **생성 속도** | 46.2 tok/s | ~49.5 tok/s |
+| **한국어/코드 강화** | ✅ 파인튜닝으로 향상 | 기본 수준 |
+| **HF 다운로드** | ~8,908 | ~2,230 |
+
+> **검열 해제 방식 차이**
+> - **Uncensored**: 거부 없이 직접 답하도록 데이터로 재학습 → 코드·한국어 성능도 함께 향상
+> - **Abliterated**: 모델 내부의 "거부" 방향 벡터를 수술적으로 제거 → 추가 학습 없이 검열 해제, 능력 향상은 없음
+>   - Gemma 4 26B는 MoE 구조 특성상 표준 abliteration만으론 거부율 29% 잔존 → **EGA(Expert-Granular Abliteration)** 로 각 전문가(expert)에 개별 적용해 0.7%로 감소
+
+### uncensored-v2 Quick Bench 성능 (vs Gemma 4 26B IT 기준)
+
+| 카테고리 | Gemma 4 26B IT | SuperGemma4 uncensored-v2 | 향상 |
+|---------|:--------------:|:-------------------------:|:----:|
+| 코드 | 92.3 | 98.6 | +6.3 |
+| 로직/추론 | 86.9 | 95.2 | +8.3 |
+| 한국어 | 90.7 | 95.0 | +4.3 |
+| **전체** | **91.4** | **95.8** | **+4.4** |
+
+v1 대비 v2 개선: tool-call 라우팅 버그 수정, 생성 속도 +8.7% (46.2 tok/s), 채팅 템플릿 중립화.
+
+### 31B 모델
+
+26B 대비 파라미터 5B 증가. 텍스트 전용, Abliterated 방식.
+
+| 항목 | MLX 4bit | GGUF Q4_K_M |
+|------|:--------:|:-----------:|
+| **런타임** | `mlx_lm` (Apple Silicon) | llama.cpp / Ollama |
+| **용량** | ~17.3GB | ~18.7GB |
+| **생성 속도 (참고)** | MLX 미측정 (RTX 3090 기준 ~30 tok/s) | - |
+| **멀티모달** | ❌ | ❌ |
+| **HF 다운로드** | ~1,302 | - |
+| **HF** | [링크](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-mlx-4bit) | [링크](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-GGUF) |
+
+> 31B는 26B uncensored-v2 대비 파인튜닝 없이 Abliterated만 적용 — 코드·한국어 강화 효과는 없음. Dense 구조라 26B MoE보다 생성 속도가 느림. 순수 파라미터 증가에 따른 베이스 성능 향상이 목적.
+
+**결론**
+- 이미지 처리 필요 → `abliterated-multimodal` (26B MLX, `mlx_vlm` v0.4.3+)
+- 텍스트, 코딩·한국어 위주 → `uncensored-v2` (26B MLX, `mlx_lm`)
+- llama.cpp / Ollama 선호 → `uncensored-gguf-v2` (26B, 89.4 tok/s, 커뮤니티 최다 사용)
+- 더 큰 모델 원할 때 → `31b-abliterated` (MLX or GGUF, ~17-19GB, 단 Dense라 느림)
+
+> **⚠️ 알려진 버그**: Gemma4 베이스 모델의 토큰 반복 붕괴(token repetition collapse) 버그가 [google-deepmind/gemma#622](https://github.com/google-deepmind/gemma/issues/622)로 공식 확인됨. Ollama/LMStudio 환경에서 재현. **MLX 환경에서는 미재현** — serving template 문제로 추정.
+
+> **⚠️ MLX 주의사항**: `--chat-template` 옵션에 파일 경로 문자열을 직접 전달하지 말 것. 경로 문자열이 템플릿 본문 대신 그대로 주입되어 응답이 손상됨. 모델 내부 번들 템플릿을 자동 감지에 맡기는 것이 올바른 방법.
+
+---
+
+## 하드웨어 가이드
+
+### Dense vs MoE
+
+로컬 환경에서 4-bit 양자화 기준:
+
+| | Dense | MoE |
+|---|---|---|
+| **속도** | 느림 (전체 파라미터 추론) | 빠름 (활성 파라미터만 추론) |
+| **메모리 효율** | 낮음 | 높음 |
+| **Qwen3.6-27B-6bit** | ✅ Dense 27B (~23GB, 36%) | - |
+| **SuperGemma4-26B** | - | ✅ MoE 26B (~13GB, 25%) |
+
+Qwen3.6-27B는 **Dense 27B 아키텍처** (MoE 아님). 전체 27B 파라미터가 추론에 참여하므로 메모리 소비가 크지만, 단일 모델로서 품질이 안정적입니다.
+
+### Apple Silicon 메모리별 추천
+
+| 메모리 | 추천 모델 | 메모리 사용 | 예상 속도 |
+|------:|---------|--------:|--------:|
+| **24GB** | Qwen3.6-27B-6bit | ~23GB | ~45~55 tok/s |
+| **32GB** | Qwen3.6-27B-6bit | ~23GB | ~45~55 tok/s |
+| **64GB** | **Qwen3.6-27B-6bit** — 멀티모달+Thinking | ~23GB | ~45~55 tok/s |
+| **128GB** | Qwen3-Coder-Next 80B-A3B 등 대형 MoE | - | - |
+
+### 용도별 추천
+
+| 용도 | 추천 모델 | 이유 |
+|------|---------|------|
+| 멀티모달 + 한국어 + 코딩 | **Qwen3.6-27B-6bit** | 이미지+텍스트, Thinking ON, 23GB |
+| 무검열 + 툴콜 강화 | **SuperGemma4 26B** | 완전 무검열, 128K, 13GB |
+| 긴 컨텍스트 | **Qwen3.6-27B 1M** | YaRN으로 200만 글자 |
+| 코딩 에이전트 | Qwen3-Coder-Next 80B-A3B | SWE-bench 최강 |
+
+---
+
+## 벤치마크 비교
+
+| 벤치마크 | Qwen3.6-27B-6bit | SuperGemma4¹ | GPT-5 mini | Claude Sonnet 4.5 |
+|---------|:----------------:|:------------:|:---------:|:-----------------:|
+| MMLU-Pro | **86.2** | 82.6 | 83.7 | 80.8 |
+| SWE-bench (Verified) | **77.2** | - | 72.0 | 62.0 |
+| LiveCodeBench v6 | 미측정 | 77.1 | 80.5 | 82.7 |
+| BFCL-V4 (도구) | 미측정 | 툴콜 2배↑² | 55.5 | 54.8 |
+| GPQA Diamond | **87.8** | 82.3 | - | - |
+| 생성 속도 (MLX) | ~45~55 tok/s³ | ~46 tok/s | - | - |
+
+> ¹ Gemma 4 26B-it 공식 벤치마크 기준. ² 자체 측정, 독립 검증 미완료. ³ M5 Pro 64GB 추정치 (메모리 대역폭 153 GB/s 기반), 실측 예정.
+
+### 커뮤니티 벤치마크 공유 (whatcani.run)
+
+[whatcani.run](https://www.whatcani.run/)은 실사용자 실측 LLM 벤치마크 공유 플랫폼. MLX/llama.cpp 런타임 공식 지원.
+
+```bash
+bunx whatcanirun run \
+  --model mlx-community/Qwen3.6-27B-6bit \
+  --runtime mlx \
+  --submit
+```
 
 ---
 
@@ -576,7 +626,7 @@ brew install llmfit
 llmfit system                                    # 시스템 사양 확인
 llmfit fit                                       # 호환 모델 전체 추천
 llmfit search qwen3.6                            # 특정 모델 검색
-llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.5-27B-4bit  # 두 모델 비교
+llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # 두 모델 비교
 ```
 
 ### M5 Pro 64GB 추천 결과 (2026-03-22 기준)
@@ -584,71 +634,8 @@ llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.5-27B-4bit  # 두
 | 상태 | 모델 | Score | tok/s | 메모리% |
 |:---:|------|:---:|------:|------:|
 | Good | Qwen3-Coder-Next 80B-A3B | 99 | 105 | 64% |
-| Perfect | Qwen3.5-122B-A10B (NVFP4) | 96 | 62 | 52% |
 | Perfect | GPT-OSS 20B | 91 | 64 | 17% |
-
----
-
-## 성능 테스트 결과
-
-### Qwen3.6-27B-6bit
-
-> 측정 예정
-
-### SuperGemma4-26B (공개 벤치마크 기준)
-
-| 항목 | 값 |
-|------|-----|
-| 생성 속도 (MLX 4bit) | ~46 tok/s |
-| 프롬프트 처리 | ~328 tok/s |
-| 런타임 메모리 | ~15GB |
-
----
-
-## 메모리별 추천 모델 가이드
-
-### MoE vs Dense
-
-로컬 환경에서 4-bit 양자화 기준:
-
-| | MoE | Dense |
-|---|---|---|
-| **속도** | 빠름 (활성 파라미터만 추론) | 느림 (전체 파라미터 추론) |
-| **메모리 효율** | 높음 | 낮음 |
-| **64GB 예시** | SuperGemma4-26B (~13GB, MoE) | ✅ **Qwen3.6-27B-6bit (~23GB, Dense)** |
-
-### Apple Silicon 메모리별 추천
-
-| 메모리 | 추천 모델 | 메모리 사용 | 예상 속도 |
-|------:|---------|--------:|--------:|
-| **24GB** | Qwen3.6-27B-6bit | ~23GB | 미측정 |
-| **32GB** | Qwen3.6-27B-6bit | ~23GB | 미측정 |
-| **64GB** | **Qwen3.6-27B-6bit** — 멀티모달+Thinking | ~23GB | 미측정 |
-| **128GB** | Qwen3.5-122B-A10B (Q4) | ~70GB | ~15 tok/s |
-
-### 용도별 추천
-
-| 용도 | 추천 모델 | 이유 |
-|------|---------|------|
-| 멀티모달 + 한국어 + 코딩 | **Qwen3.6-27B-6bit** | 이미지+텍스트, Thinking ON, 23GB |
-| 무검열 + 툴콜 강화 | **SuperGemma4 26B** | 완전 무검열, 128K, 15GB |
-| 긴 컨텍스트 | **Qwen3.6-27B 1M** | YaRN으로 200만 글자 |
-| 코딩 에이전트 | Qwen3-Coder-Next 80B-A3B | SWE-bench 최강 |
-| 코딩 품질 최우선 | Qwen3.5-27B (Dense) | SWE 72.4, LiveCode 80.7 |
-| 에이전트/도구 호출 | Qwen3.5-122B-A10B | BFCL 72.2 (128GB 필요) |
-
-### 벤치마크 비교
-
-| 벤치마크 | Qwen3.6-27B-6bit | SuperGemma4¹ | Qwen3.5-27B | Qwen3.5-122B-A10B | GPT-5 mini | Claude Sonnet 4.5 |
-|---------|:----------------:|:------------:|:-----------:|:-----------------:|:---------:|:-----------------:|
-| MMLU-Pro | 86.2 | 82.6 | 86.1 | **86.7** | 83.7 | 80.8 |
-| SWE-bench (Verified) | **77.2** | - | 72.4 | 72.0 | 72.0 | 62.0 |
-| LiveCodeBench v6 | 83.9 | 77.1 | **80.7** | 78.9 | 80.5 | 82.7 |
-| BFCL-V4 (도구) | 미측정 | 툴콜 2배↑² | 68.5 | **72.2** | 55.5 | 54.8 |
-| GPQA Diamond | **87.8** | 82.3 | - | - | - | - |
-| 생성 속도 (MLX) | ~45~55 tok/s³ | ~46 tok/s | ~15 tok/s | - | - | - |
-
-> ¹ Gemma 4 26B-it 공식 벤치마크 기준. ² 자체 측정, 독립 검증 미완료. ³ M5 Pro 64GB 추정치 (메모리 대역폭 153 GB/s 기반), 실측 예정.
+| Perfect | Qwen3.6-27B-6bit | 88 | 50 | 36% |
 
 ---
 
@@ -679,7 +666,6 @@ llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.5-27B-4bit  # 두
 
 - [MLX-VLM GitHub](https://github.com/Blaizzy/mlx-vlm)
 - [Qwen3.6-27B-6bit (MLX Community)](https://huggingface.co/mlx-community/Qwen3.6-27B-6bit)
-- [Qwen3.5-122B-A10B (MLX 4bit)](https://huggingface.co/mlx-community/Qwen3.5-122B-A10B-4bit)
 - [Qwen3.6 공식 HuggingFace](https://huggingface.co/Qwen/Qwen3.6-27B)
 - [SuperGemma4 26B uncensored MLX 4bit (v2)](https://huggingface.co/Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2)
 - [SuperGemma4 26B abliterated multimodal MLX 4bit](https://huggingface.co/Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit)
