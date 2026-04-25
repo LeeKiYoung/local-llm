@@ -13,7 +13,7 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 
 | 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
-| **Qwen3.6-27B-6bit** (기본) | `./llm-server.sh` | ~23GB | ~45~55 tok/s³ | 멀티모달(이미지), Thinking 기본 ON, preserve_thinking 지원, mlx-vlm 런타임 |
+| **Qwen3.6-27B-6bit** (기본) | `./llm-server.sh` | ~23GB | ~45~55 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
 | **SuperGemma4-26B abliterated-multimodal** | 직접 모델 ID 지정¹ | ~15GB | ~49 tok/s | 무검열(EGA), 이미지+텍스트 입력 지원 |
 
@@ -28,7 +28,7 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 | 기능 | Qwen3.6-27B (기본) | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
 |------|:-----------------:|:------------------------:|:---------------------------------:|
 | 컨텍스트 프로필 (1m/262k) | ✅ | ❌ (128K 고정) | ❌ (256K 고정) |
-| Thinking 모드 (`enable_thinking`) | ✅ (기본 ON) | ❌ | ❌ |
+| Thinking 모드 (`enable_thinking`) | ✅ (기본 OFF) | ❌ | ❌ |
 | 대화형 채팅 (`llm-chat.sh`) | ✅ | ❌ | ❌ |
 | 이미지 입력 (멀티모달) | ✅ | ❌ | ✅ |
 | 영상 입력 | ❌ | ❌ | ❌ |
@@ -45,7 +45,7 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 | **생성 속도** | ~103 tok/s | ~45~55 tok/s³ | ~46 tok/s |
 | **컨텍스트** | 262K / 1M (YaRN) | 262K / 1M (YaRN) | 128K 고정 |
 | **이미지 입력** | ❌ | ✅ | ❌ |
-| **Thinking 모드** | ✅ | ✅ **(기본 ON)** | ❌ |
+| **Thinking 모드** | ✅ | ✅ **(기본 OFF)** | ❌ |
 | **검열 해제** | ❌ | ❌ | ✅ (파인튜닝) |
 | **한국어/코딩 강화** | 기본 | 기본 | ✅ (파인튜닝) |
 | **툴 콜 강화** | 기본 | 기본 | ✅ (2배↑) |
@@ -54,7 +54,7 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 | **SWE-bench Verified** | - | **77.2** | - |
 | **GPQA Diamond** | - | **87.8** | 82.3 |
 
-Qwen3.6은 파라미터가 줄었지만 Dense 아키텍처로 전환 + 멀티모달 추가 + Thinking 기본 ON. 속도는 MoE였던 3.5보다 느리지만 이미지·Thinking 지원이 핵심 차이.
+Qwen3.6은 파라미터가 줄었지만 Dense 아키텍처로 전환 + 멀티모달 추가 + Thinking 기본 OFF, 요청별 ON 가능. 속도는 MoE였던 3.5보다 느리지만 이미지·Thinking 지원이 핵심 차이.
 
 ---
 
@@ -85,7 +85,7 @@ cd local-llm
 
 | # | 모델 | 메모리 | 특징 |
 |:-:|------|------:|------|
-| 1 | **Qwen3.6-27B-6bit** ⭐ | ~23GB | VLM, 텍스트+이미지, Thinking 기본 ON |
+| 1 | **Qwen3.6-27B-6bit** ⭐ | ~23GB | VLM, 텍스트+이미지, Thinking 기본 OFF |
 | 2 | **SuperGemma4-26B** (무검열) | ~16GB | 무검열 보조 모델 (텍스트 전용) |
 | 3 | 직접 입력 | - | Hugging Face 모델 ID |
 
@@ -213,7 +213,7 @@ OpenAI 호환 API 서버. FastAPI + mlx_vlm Python API로 직접 추론.
 
 ```bash
 # Qwen3.6-27B (기본)
-./llm-server.sh              # 262K 컨텍스트, Thinking ON (기본)
+./llm-server.sh              # 262K 컨텍스트, Thinking OFF (기본)
 ./llm-server.sh 1m           # 1M 컨텍스트 (YaRN)
 ./llm-server.sh 262k 9090    # 포트 지정
 
@@ -274,11 +274,7 @@ curl http://localhost:8080/v1/chat/completions \
 #### 요청별 Thinking 제어
 
 ```bash
-# 기본값 ON → 이 요청만 OFF
-curl http://localhost:8080/v1/chat/completions \
-  -d '{"messages":[{"role":"user","content":"안녕!"}],"enable_thinking":false}'
-
-# thinking 블록 응답에 포함 (기본은 제거)
+# Thinking 활성화 (기본 OFF → 이 요청만 ON)
 curl http://localhost:8080/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"123*456=?"}],"enable_thinking":true,"preserve_thinking":true,"max_tokens":500}'
 ```
@@ -299,7 +295,7 @@ curl http://localhost:8080/v1/chat/completions \
 | `presence_penalty` | float | 0 | 존재 패널티 (OpenAI 호환용, 모델에 전달되지 않음) |
 | `frequency_penalty` | float | 0 | 빈도 패널티 (OpenAI 호환용, 모델에 전달되지 않음) |
 | `repetition_penalty` | float | null | 반복 패널티 (파싱됨, 현재 모델에 전달되지 않음) |
-| `enable_thinking` | bool | true | Thinking 모드 (기본 ON, Qwen3.6-27B 지원) |
+| `enable_thinking` | bool | false | Thinking 모드 (기본 OFF, 요청별 ON 가능, Qwen3.6-27B 지원) |
 | `preserve_thinking` | bool | false | true 시 `<think>...</think>` 블록 응답에 포함 |
 
 #### 웹 UI 연동
@@ -401,7 +397,7 @@ YaRN(Yet another RoPE extensioN)으로 위치 인코딩을 스케일링.
 
 > Qwen3.6-27B 전용. SuperGemma4에서 `enable_thinking`을 보내도 오류는 없지만 무시됩니다. 서버가 자동 감지 처리.
 
-Qwen3.6-27B는 Thinking 기본 ON (DEFAULT_THINKING=True). `preserve_thinking=true` 요청 시 `<think>...</think>` 블록이 응답에 포함됩니다. 기본값(false)은 thinking 블록을 제거하고 최종 답변만 반환합니다.
+Qwen3.6-27B는 Thinking 기본 OFF (DEFAULT_THINKING=False). 요청 시 enable_thinking=true로 ON 가능. `preserve_thinking=true` 요청 시 `<think>...</think>` 블록이 응답에 포함됩니다. 기본값(false)은 thinking 블록을 제거하고 최종 답변만 반환합니다.
 
 ### Thinking ON
 
@@ -420,7 +416,7 @@ Qwen3.6-27B는 Thinking 기본 ON (DEFAULT_THINKING=True). `preserve_thinking=tr
 | 모드 | 방법 | 동작 |
 |------|------|:---:|
 | `llm-chat.sh` (대화형) | 프롬프트에 `/no_think` 추가 | O |
-| `llm-server.sh` (API) | 기본값 Thinking ON | O |
+| `llm-server.sh` (API) | 기본값 Thinking OFF | O |
 | `llm-server.sh --no-think` (API) | --no-think 명시 (Thinking OFF) | O |
 | API 요청 `enable_thinking` | **요청별 제어 가능** | **O** |
 | API 요청 `preserve_thinking` | **thinking 블록 포함 여부** | **O** |

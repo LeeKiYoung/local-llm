@@ -41,7 +41,7 @@ gpu_semaphore = None
 pending = 0
 MAX_QUEUE = 5
 LOG_DIR = ""
-DEFAULT_THINKING = True
+DEFAULT_THINKING = False
 
 
 # ── 로깅 ─────────────────────────────────────────
@@ -456,8 +456,8 @@ def main():
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--max-queue", type=int, default=5)
-    parser.add_argument("--think", action=argparse.BooleanOptionalAction, default=True,
-                        help="Thinking ON/OFF (기본값: ON, --no-think으로 비활성화)")
+    parser.add_argument("--think", action=argparse.BooleanOptionalAction, default=False,
+                        help="Thinking ON/OFF (기본값: OFF, --think으로 활성화)")
     args = parser.parse_args()
 
     model_id = args.model
