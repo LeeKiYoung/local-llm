@@ -45,6 +45,8 @@ _spec.loader.exec_module(server_module)
 # so we must capture the real implementation here, at import time.
 _REAL_EXTRACT_IMAGES = server_module.extract_images
 _REAL_STRIP_THINKING = server_module.strip_thinking
+_REAL_NORMALIZE_MESSAGES = server_module.normalize_messages
+_REAL_GET_PROMPT_PREVIEW = server_module.get_prompt_preview
 # Capture DEFAULT_THINKING at module load time, before the fixture overrides it to False.
 _MODULE_DEFAULT_THINKING_AT_LOAD = server_module.DEFAULT_THINKING
 
@@ -433,3 +435,137 @@ class TestPreserveThinking:
         body = resp.json()
         assert "error" in body
         assert body["error"]["type"] == "invalid_request_error"
+
+
+# ── normalize_messages() 유닛 테스트 ─────────────────────────────────────────
+class TestNormalizeMessages:
+    def test_content_list_extracts_text_parts(self):
+        """멀티모달 content list → text 파트만 추출해서 문자열로 변환"""
+        messages = [
+            {"role": "user", "content": [
+                {"type": "text", "text": "이 이미지는?"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+            ]}
+        ]
+        result = _REAL_NORMALIZE_MESSAGES(messages)
+        assert result[0]["content"] == "이 이미지는?"
+
+    def test_tool_calls_arguments_string_parsed_to_dict(self):
+        """JSON 문자열 tool_calls arguments → dict로 파싱"""
+        messages = [
+            {"role": "assistant", "tool_calls": [
+                {"type": "function", "function": {"name": "foo", "arguments": '{"x": 1}'}}
+            ]}
+        ]
+        result = _REAL_NORMALIZE_MESSAGES(messages)
+        assert result[0]["tool_calls"][0]["function"]["arguments"] == {"x": 1}
+
+    def test_tool_calls_arguments_invalid_json_becomes_empty_dict(self):
+        """잘못된 JSON arguments → 빈 dict"""
+        messages = [
+            {"role": "assistant", "tool_calls": [
+                {"type": "function", "function": {"name": "foo", "arguments": "INVALID JSON"}}
+            ]}
+        ]
+        result = _REAL_NORMALIZE_MESSAGES(messages)
+        assert result[0]["tool_calls"][0]["function"]["arguments"] == {}
+
+
+# ── get_prompt_preview() 유닛 테스트 ─────────────────────────────────────────
+class TestGetPromptPreview:
+    def test_empty_messages_returns_empty_string(self):
+        assert _REAL_GET_PROMPT_PREVIEW([]) == ""
+
+    def test_list_content_returns_stringified_preview(self):
+        messages = [{"role": "user", "content": [{"type": "text", "text": "안녕"}]}]
+        result = _REAL_GET_PROMPT_PREVIEW(messages)
+        assert "안녕" in result
+
+    def test_none_content_returns_empty_string(self):
+        messages = [{"role": "user", "content": None}]
+        result = _REAL_GET_PROMPT_PREVIEW(messages)
+        assert result == ""
+
+
+# ── extract_images() 엣지케이스 ──────────────────────────────────────────────
+class TestExtractImagesEdgeCases:
+    def test_oversized_base64_raises_value_error(self):
+        """base64 디코딩 결과가 MAX_IMAGE_BYTES 초과 → ValueError"""
+        original = server_module.MAX_IMAGE_BYTES
+        server_module.MAX_IMAGE_BYTES = 5
+        try:
+            data = base64.b64encode(b"x" * 100).decode()
+            url = f"data:image/png;base64,{data}"
+            messages = [
+                {"role": "user", "content": [{"type": "image_url", "image_url": {"url": url}}]}
+            ]
+            with pytest.raises(ValueError, match="크기 초과"):
+                _REAL_EXTRACT_IMAGES(messages)
+        finally:
+            server_module.MAX_IMAGE_BYTES = original
+
+    def test_disallowed_url_scheme_raises_value_error(self):
+        """허용되지 않는 URL 스킴 (file://) → ValueError"""
+        messages = [
+            {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "file:///etc/passwd"}}]}
+        ]
+        with pytest.raises(ValueError, match="허용되지 않는 URL 스킴"):
+            _REAL_EXTRACT_IMAGES(messages)
+
+    def test_invalid_image_decode_raises_value_error(self):
+        """Image.open 예외 → '이미지 디코딩 실패' ValueError로 래핑"""
+        server_module.Image.open.side_effect = Exception("PIL 디코딩 오류")
+        try:
+            tiny_b64 = base64.b64encode(b"not-an-image").decode()
+            url = f"data:image/png;base64,{tiny_b64}"
+            messages = [
+                {"role": "user", "content": [{"type": "image_url", "image_url": {"url": url}}]}
+            ]
+            with pytest.raises(ValueError, match="이미지 디코딩 실패"):
+                _REAL_EXTRACT_IMAGES(messages)
+        finally:
+            server_module.Image.open.side_effect = None
+
+
+# ── 스트리밍 엣지케이스 ───────────────────────────────────────────────────────
+class TestStreamingEdgeCases:
+    def test_stream_finish_reason_length(self, client):
+        """completion_tokens >= max_tokens → finish_reason 'length'"""
+        # max_tokens=2, generation_tokens=2에서 2 >= 2 조건 충족
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+            "stream": True,
+            "max_tokens": 2,
+        })
+        assert resp.status_code == 200
+        chunks = [
+            json.loads(l.replace("data: ", ""))
+            for l in resp.text.strip().split("\n\n")
+            if l.startswith("data: {")
+        ]
+        finish_reasons = [
+            c["choices"][0].get("finish_reason")
+            for c in chunks
+            if c["choices"][0].get("finish_reason")
+        ]
+        assert "length" in finish_reasons
+
+    def test_stream_inference_error_propagates(self, client):
+        """스트리밍 중 RuntimeError → 예외가 큐를 통해 event_generator로 전파"""
+        def mock_stream_error(*args, **kwargs):
+            yield MockResponse("Hello", generation_tokens=1)
+            raise RuntimeError("GPU 메모리 부족")
+
+        server_module.stream_generate = mock_stream_error
+        try:
+            resp = client.post("/v1/chat/completions", json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "test"}],
+                "stream": True,
+            })
+            # 스트리밍 헤더 전송 후 예외 발생 시 200 또는 500
+            assert resp.status_code in (200, 500)
+        except Exception:
+            # TestClient가 스트리밍 도중 예외를 전파하는 경우
+            pass

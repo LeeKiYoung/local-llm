@@ -24,7 +24,7 @@ jobs:
         run: pip install fastapi uvicorn httpx pytest pytest-cov
 
       - name: Run tests
-        run: pytest test_api_server.py -v --cov=. --cov-report=xml --cov-report=term-missing
+        run: pytest tests/test_api_server.py tests/test_proxy_units.py -v --cov=. --cov-report=xml --cov-report=term-missing
 
       - name: Coverage comment
         uses: MishaKav/pytest-coverage-comment@main
