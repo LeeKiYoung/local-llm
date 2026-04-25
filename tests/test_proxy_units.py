@@ -11,7 +11,7 @@ import sys
 # llm-proxy.py 로드 (하이픈 파일명)
 _spec = importlib.util.spec_from_file_location(
     "llm_proxy",
-    os.path.join(os.path.dirname(__file__), "llm-proxy.py"),
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "llm-proxy.py"),
 )
 proxy_module = importlib.util.module_from_spec(_spec)
 sys.modules["llm_proxy"] = proxy_module

@@ -34,7 +34,7 @@ import importlib.util
 # 하이픈 파일명이라 importlib으로 로드
 _spec = importlib.util.spec_from_file_location(
     "llm_api_server",
-    os.path.join(os.path.dirname(__file__), "llm-api-server.py"),
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "llm-api-server.py"),
 )
 server_module = importlib.util.module_from_spec(_spec)
 sys.modules["llm_api_server"] = server_module
