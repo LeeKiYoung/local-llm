@@ -43,6 +43,10 @@ MAX_QUEUE = 5
 LOG_DIR = ""
 DEFAULT_THINKING = False
 
+# 대형 프리필 경고 임계값 (토큰 수 추정치 기준, 실제 토큰화 전 문자 수 / 3.5 근사)
+# 100K 토큰 이상이면 Metal OOM 위험을 콘솔에 경고한다
+_LARGE_PREFILL_CHAR_THRESHOLD = 350_000  # ~100K 토큰
+
 
 # ── 로깅 ─────────────────────────────────────────
 def get_log_file():
@@ -178,6 +182,23 @@ def strip_thinking(text):
     return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
 
 
+def _warn_large_prefill(messages):
+    """메시지 전체 문자 수 기준으로 대형 프리필 위험을 콘솔에 경고한다.
+
+    Metal GPU는 대형 프리필 도중 OOM이 발생하면 C-level abort()를 일으킨다.
+    Python try/except로 잡을 수 없으므로 사전 경고만 제공한다.
+    """
+    total_chars = sum(
+        len(m.get("content", "") if isinstance(m.get("content"), str) else str(m.get("content", "")))
+        for m in messages
+    )
+    if total_chars >= _LARGE_PREFILL_CHAR_THRESHOLD:
+        approx_tokens = total_chars // 3
+        print(f"  [WARN] 대형 프리필 감지: ~{approx_tokens:,}토큰 추정 "
+              f"({total_chars:,}자). Metal OOM 위험 — 컨텍스트 크기를 줄이거나 "
+              f"서버 재시작 후 요청하세요.")
+
+
 # ── 응답 생성 ─────────────────────────────────────
 def make_completion_response(req_id, model_name, content, finish_reason, prompt_tokens, completion_tokens):
     return {
@@ -218,6 +239,9 @@ def run_inference(params):
     images = params.get("_images") if "_images" in params else extract_images(params["messages"])
     messages = normalize_messages(params["messages"])
 
+    # 대형 프리필 경고 (Metal OOM 사전 감지)
+    _warn_large_prefill(messages)
+
     # apply_chat_template은 processor의 메서드가 아닌 독립 함수 (per D-12, RESEARCH Pattern 2)
     formatted = apply_chat_template(
         processor,
@@ -226,6 +250,11 @@ def run_inference(params):
         num_images=len(images),
         chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
     )
+
+    # 추론 전 캐시 해제: 이전 요청이 비정상 종료되었을 때 잔류 GPU 메모리를 비운다.
+    # Metal은 프리필 도중 OOM이 발생하면 C-level abort()를 호출하므로
+    # 사전 해제로 사용 가능한 GPU 메모리를 최대화한다.
+    mx.clear_cache()
 
     # mlx_vlm.generate()는 sampler 오브젝트 불필요 — temp/top_p 직접 전달 (per RESEARCH Pitfall 2)
     result = generate(
@@ -259,6 +288,9 @@ def run_inference_streaming(params):
     images = params.get("_images") if "_images" in params else extract_images(params["messages"])
     messages = normalize_messages(params["messages"])
 
+    # 대형 프리필 경고 (Metal OOM 사전 감지)
+    _warn_large_prefill(messages)
+
     formatted = apply_chat_template(
         processor,
         model.config,
@@ -267,18 +299,27 @@ def run_inference_streaming(params):
         chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
     )
 
-    for response in stream_generate(
-        model,
-        processor,
-        formatted,
-        image=images if images else None,
-        max_tokens=params["max_tokens"],
-        temp=params["temperature"],
-        top_p=params["top_p"],
-    ):
-        yield response
-
+    # 추론 전 캐시 해제: 이전 요청이 비정상 종료되었을 때 잔류 GPU 메모리를 비운다.
+    # Metal은 프리필 도중 OOM이 발생하면 C-level abort()를 호출하므로
+    # 사전 해제로 사용 가능한 GPU 메모리를 최대화한다.
     mx.clear_cache()
+
+    try:
+        for response in stream_generate(
+            model,
+            processor,
+            formatted,
+            image=images if images else None,
+            max_tokens=params["max_tokens"],
+            temp=params["temperature"],
+            top_p=params["top_p"],
+        ):
+            yield response
+    finally:
+        # stream_generate()가 정상 종료되든 예외를 던지든 반드시 캐시를 해제한다.
+        # 예외 없이 완료된 경우에도 이 finally가 실행되므로 이중 호출이 되지만
+        # mx.clear_cache()는 멱등(idempotent)이므로 안전하다.
+        mx.clear_cache()
 
 
 # ── 엔드포인트 ────────────────────────────────────
@@ -412,8 +453,6 @@ def _stream_response(req_id, params, ip, start, last_msg):
                         finish_reason = "length"
 
                     yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': item.text}))}\n\n"
-
-                mx.clear_cache()
 
                 # preserve_thinking=False일 때 full_text에서 <think> 블록 제거 (per D-19)
                 # 주의: SSE 청크는 이미 yield됐으므로 content_preview 로그에만 영향 (알려진 제한)
