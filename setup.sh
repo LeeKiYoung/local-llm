@@ -61,81 +61,42 @@ if [ "$1" != "--no-model" ]; then
   echo "--------------------------------------------"
   echo ""
 
-  if [ "$TOTAL_GB" -ge 64 ]; then
-    MEM_TAG="64GB+"
-  elif [ "$TOTAL_GB" -ge 48 ]; then
-    MEM_TAG="48GB"
-  elif [ "$TOTAL_GB" -ge 32 ]; then
-    MEM_TAG="32GB"
-  elif [ "$TOTAL_GB" -ge 24 ]; then
-    MEM_TAG="24GB"
-  elif [ "$TOTAL_GB" -ge 16 ]; then
-    MEM_TAG="16GB"
-  else
-    MEM_TAG="8GB"
-  fi
-
   echo "  현재 메모리: ${TOTAL_GB}GB — 아래에서 적합한 모델을 선택하세요."
   echo ""
-  echo "  ┌─────┬──────────────────────────┬────────┬───────────┬────────┬──────────────────────────────┐"
-  echo "  │  #  │ 모델                     │ 메모리 │ 속도      │ 최소   │ 특징                         │"
-  echo "  ├─────┼──────────────────────────┼────────┼───────────┼────────┼──────────────────────────────┤"
-  echo "  │  1  │ Qwen3.5-35B-A3B    ⭐    │ ~20GB  │ 103 tok/s │ 24GB+  │ 한국어+코딩+비전 올라운더     │"
-  echo "  │  2  │ SuperGemma4-26B          │ ~16GB  │ -         │ 24GB+  │ 텍스트 전용 (현재 서버 기준)  │"
-  echo "  │  3  │ Qwen3.5-9B               │ ~6GB   │ 40+ tok/s │ 16GB+  │ 가볍고 빠름                   │"
-  echo "  │  4  │ Qwen3.5-27B              │ ~17GB  │ 15  tok/s │ 24GB+  │ Dense, 코딩 벤치마크 최강     │"
-  echo "  │  5  │ Qwen3-Coder-Next-80B     │ ~15GB  │ 25+ tok/s │ 24GB+  │ 코딩 에이전트 특화            │"
-  echo "  │  6  │ 직접 입력                │ -      │ -         │ -      │ Hugging Face 모델 ID         │"
-  echo "  └─────┴──────────────────────────┴────────┴───────────┴────────┴──────────────────────────────┘"
+  echo "  ┌─────┬──────────────────────────┬────────┬───────────┬────────┬──────────────────────────────────┐"
+  echo "  │  #  │ 모델                     │ 메모리 │ 속도      │ 최소   │ 특징                             │"
+  echo "  ├─────┼──────────────────────────┼────────┼───────────┼────────┼──────────────────────────────────┤"
+  echo "  │  1  │ Qwen3.6-27B-6bit   ⭐    │ ~23GB  │ -         │ 24GB+  │ VLM, 텍스트+이미지, thinking     │"
+  echo "  │  2  │ SuperGemma4-26B          │ ~16GB  │ -         │ 24GB+  │ 무검열 보조 모델 (텍스트 전용)   │"
+  echo "  │  3  │ 직접 입력                │ -      │ -         │ -      │ Hugging Face 모델 ID             │"
+  echo "  └─────┴──────────────────────────┴────────┴───────────┴────────┴──────────────────────────────────┘"
   echo ""
 
   # 메모리 기반 추천 표시
-  if [ "$TOTAL_GB" -lt 16 ]; then
-    echo "  💡 ${TOTAL_GB}GB 메모리 — [2] Qwen3.5-9B를 권장합니다."
-  elif [ "$TOTAL_GB" -lt 24 ]; then
-    echo "  💡 ${TOTAL_GB}GB 메모리 — [2] Qwen3.5-9B를 권장합니다."
-  elif [ "$TOTAL_GB" -lt 48 ]; then
-    echo "  💡 ${TOTAL_GB}GB 메모리 — [1] Qwen3.5-35B-A3B를 권장합니다."
+  if [ "$TOTAL_GB" -lt 24 ]; then
+    echo "  💡 ${TOTAL_GB}GB 메모리 — 최소 24GB가 필요합니다. 직접 입력([3])으로 경량 모델을 선택하세요."
   else
-    echo "  💡 ${TOTAL_GB}GB 메모리 — 모든 모델 실행 가능! [1] 추천."
+    echo "  💡 ${TOTAL_GB}GB 메모리 — [1] Qwen3.6-27B-6bit를 권장합니다."
   fi
   echo ""
 
-  read -p "  선택 [1-6] (기본: 1): " MODEL_CHOICE
+  read -p "  선택 [1-3] (기본: 1): " MODEL_CHOICE
   MODEL_CHOICE=${MODEL_CHOICE:-1}
 
   case "$MODEL_CHOICE" in
     1)
-      MODEL="mlx-community/Qwen3.5-35B-A3B-4bit"
-      MODEL_NAME="Qwen3.5-35B-A3B-4bit"
-      MODEL_SIZE="~19GB"
-      SERVER_ARG=""
+      MODEL="mlx-community/Qwen3.6-27B-6bit"
+      MODEL_NAME="Qwen3.6-27B-6bit"
+      MODEL_SIZE="~23GB"
+      SERVER_ARG="qwen36"
       ;;
     2)
-      MODEL="Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit"
+      MODEL="Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2"
       MODEL_NAME="SuperGemma4-26B-4bit"
       MODEL_SIZE="~16GB"
       SERVER_ARG="supergemma4"
       ;;
     3)
-      MODEL="mlx-community/Qwen3.5-9B-4bit"
-      MODEL_NAME="Qwen3.5-9B-4bit"
-      MODEL_SIZE="~6GB"
-      SERVER_ARG=""
-      ;;
-    4)
-      MODEL="mlx-community/Qwen3.5-27B-4bit"
-      MODEL_NAME="Qwen3.5-27B-4bit"
-      MODEL_SIZE="~17GB"
-      SERVER_ARG=""
-      ;;
-    5)
-      MODEL="mlx-community/Qwen3-Coder-Next-80B-A3B-4bit"
-      MODEL_NAME="Qwen3-Coder-Next-4bit"
-      MODEL_SIZE="~15GB"
-      SERVER_ARG=""
-      ;;
-    6)
       read -p "  Hugging Face 모델 ID: " MODEL
       MODEL_NAME="$MODEL"
       MODEL_SIZE="알 수 없음"
@@ -161,16 +122,24 @@ else
   echo "✅ 가상환경 생성 완료"
 fi
 
-# 6. mlx-lm 설치
+# 6. mlx-vlm 설치
 echo ""
-echo "📦 mlx-lm 설치 중..."
+echo "📦 mlx-vlm 설치 중..."
 "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
-"$SCRIPT_DIR/.venv/bin/pip" install "git+https://github.com/ml-explore/mlx-lm.git" -q
-echo "✅ mlx-lm 설치 완료 (GitHub 최신 — gemma4 지원 포함)"
+"$SCRIPT_DIR/.venv/bin/pip" install mlx-vlm -q
+echo "✅ mlx-vlm 설치 완료"
 
 echo "📦 FastAPI + uvicorn 설치 중..."
 "$SCRIPT_DIR/.venv/bin/pip" install fastapi uvicorn -q
 echo "✅ FastAPI + uvicorn 설치 완료"
+
+echo "📦 Pillow 설치 중 (이미지 처리)..."
+"$SCRIPT_DIR/.venv/bin/pip" install Pillow -q
+echo "✅ Pillow 설치 완료"
+
+echo "📦 torch + torchvision 설치 중 (transformers 의존성)..."
+"$SCRIPT_DIR/.venv/bin/pip" install torch torchvision -q
+echo "✅ torch + torchvision 설치 완료"
 
 # 7. HuggingFace 캐시 경로 안내
 HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
@@ -202,10 +171,10 @@ else
   save_model_config
   echo ""
   echo "📥 모델 다운로드 중... ($MODEL_SIZE, 시간이 걸릴 수 있습니다)"
-  "$SCRIPT_DIR/.venv/bin/mlx_lm.generate" \
-    --model "$MODEL" \
-    --prompt "Hello" \
-    --max-tokens 1 2>&1 | tail -3
+  "$SCRIPT_DIR/.venv/bin/python" -c "
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='$MODEL', ignore_patterns=['*.bin', '*.pt'])
+" 2>&1 | tail -5
   echo "✅ 모델 다운로드 완료"
 fi
 

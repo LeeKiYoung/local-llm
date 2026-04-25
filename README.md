@@ -11,22 +11,23 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 
 | 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
-| **Qwen3.5-35B-A3B** (기본) | `./llm-server.sh 1m` | ~20GB | 103 tok/s | 한국어+코딩 올라운더, Thinking 모드, 1M 컨텍스트 |
+| **Qwen3.6-27B-6bit** (기본) | `./llm-server.sh` | ~23GB | 미측정 | 멀티모달(이미지), Thinking 기본 ON, preserve_thinking 지원, mlx-vlm 런타임 |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
 | **SuperGemma4-26B abliterated-multimodal** | 직접 모델 ID 지정¹ | ~15GB | ~49 tok/s | 무검열(EGA), 이미지+텍스트 입력 지원 |
 
 두 모델 동시 로드는 불가 (메모리 초과). 서버 재시작으로 전환.
 
-> ¹ abliterated-multimodal은 `mlx_vlm` 런타임이 필요 (Phase 1 통합 예정). 현재는 `python llm-api-server.py --model Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit`로 직접 실행.
+> ¹ abliterated-multimodal은 `python llm-api-server.py --model Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit`로 직접 실행.
 
 > **모델별 지원 기능**
 >
-> | 기능 | Qwen3.5 | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
-> |------|:-------:|:------------------------:|:---------------------------------:|
+> | 기능 | Qwen3.6-27B (기본) | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
+> |------|:-----------------:|:------------------------:|:---------------------------------:|
 > | 컨텍스트 프로필 (1m/262k) | ✅ | ❌ (128K 고정) | ❌ (256K 고정) |
-> | Thinking 모드 (`enable_thinking`) | ✅ | ❌ | ❌ |
+> | Thinking 모드 (`enable_thinking`) | ✅ (기본 ON) | ❌ | ❌ |
 > | 대화형 채팅 (`llm-chat.sh`) | ✅ | ❌ | ❌ |
-> | 이미지 입력 (멀티모달) | ❌ | ❌ | ✅ |
+> | 이미지 입력 (멀티모달) | ✅ | ❌ | ✅ |
+> | 영상 입력 | ❌ | ❌ | ❌ |
 
 ### SuperGemma4 모델 라인업
 
@@ -120,20 +121,16 @@ cd local-llm
 `setup.sh`가 자동으로:
 1. Apple Silicon / Python / 메모리 확인
 2. 메모리에 맞는 모델 선택 메뉴 표시
-3. 가상환경 생성 + mlx-lm + FastAPI + uvicorn 설치
+3. 가상환경 생성 + mlx-vlm + FastAPI + uvicorn 설치
 4. 선택한 모델 다운로드 + 스크립트에 자동 반영
 
-| # | 모델 | 메모리 | 속도 | 최소 RAM | 특징 |
-|:-:|------|------:|-----:|--------:|------|
-| 1 | **Qwen3.5-35B-A3B** | ~20GB | 103 tok/s | 24GB+ | 한국어+코딩 올라운더, Thinking 모드 |
-| 2 | Qwen3.5-9B | ~6GB | 40+ tok/s | 16GB+ | 가볍고 빠름 |
-| 3 | Qwen3.5-27B | ~17GB | 15 tok/s | 24GB+ | Dense, 코딩 벤치마크 최강 |
-| 4 | Qwen3-Coder-Next-80B | ~15GB | 25+ tok/s | 24GB+ | 코딩 에이전트 특화 |
-| 5 | Gemma 4 26B MoE | ~15GB | ~42 tok/s | 24GB+ | TurboQuant, 멀티모달, 256K 컨텍스트 |
-| 6 | **SuperGemma4 26B** (🔥) | ~15.6GB | ~46 tok/s | 24GB+ | 무검열+툴콜 강화, Gemma4 기반 |
-| 7 | 직접 입력 | - | - | - | Hugging Face 모델 ID |
+| # | 모델 | 메모리 | 특징 |
+|:-:|------|------:|------|
+| 1 | **Qwen3.6-27B-6bit** ⭐ | ~23GB | VLM, 텍스트+이미지, Thinking 기본 ON |
+| 2 | **SuperGemma4-26B** (무검열) | ~16GB | 무검열 보조 모델 (텍스트 전용) |
+| 3 | 직접 입력 | - | Hugging Face 모델 ID |
 
-메모리에 따라 자동 추천이 표시됩니다. Enter만 누르면 추천 모델(Qwen3.5-35B-A3B)로 설치됩니다.
+메모리에 따라 자동 추천이 표시됩니다. Enter만 누르면 추천 모델(Qwen3.6-27B-6bit)로 설치됩니다.
 
 ### 환경만 셋업 (모델 나중에)
 
@@ -146,7 +143,7 @@ cd local-llm
 첫 실행 시 모델이 자동 다운로드되며, 기본 경로에 저장됩니다:
 
 ```
-~/.cache/huggingface/hub/    (macOS/Linux 공통)
+~/.cache/huggingface/hub/models--mlx-community--Qwen3.6-27B-6bit/    (~22.8GB)
 ```
 
 경로를 바꾸고 싶다면 (외장 SSD 등):
@@ -164,17 +161,19 @@ source ~/.zshrc && ./setup.sh
 
 ```
 local-llm/
-├── setup.sh                        # 자동 셋업 (환경 + 모델 + 의존성)
-├── llm-chat.sh                     # 대화형 채팅 (Qwen3.5 전용)
-├── llm-server.sh                   # API 서버 실행
-├── llm-api-server.py               # FastAPI 커스텀 API 서버 (핵심)
+├── setup.sh                              # 자동 셋업 (환경 + 모델 + 의존성)
+├── llm-chat.sh                           # 대화형 채팅
+├── llm-server.sh                         # API 서버 실행
+├── llm-api-server.py                     # FastAPI 커스텀 API 서버 (핵심)
+├── llm-proxy.py                          # 투명 로깅 프록시 (선택적 사용)
 ├── profiles/
-│   ├── config-262k.json            # 기본 프로필 (262K, Qwen3.5 전용)
-│   └── config-1m.json              # 확장 프로필 (1M YaRN, Qwen3.5 전용)
-├── test_api_server.py              # API 서버 테스트 (13개)
-├── local-llm-guide-2026.md         # 모델 비교 가이드 문서
-├── .venv/                          # Python 가상환경
-└── logs/                           # 요청/응답 JSONL 로그 (자동 생성)
+│   ├── config-qwen36-27b-262k.json       # 기본 프로필 (262K, Qwen3.6-27B)
+│   └── config-qwen36-27b-1m.json         # 확장 프로필 (1M YaRN, Qwen3.6-27B)
+├── test_api_server.py                    # API 서버 테스트 (22개)
+├── test_proxy.py                         # 프록시 테스트
+├── local-llm-guide-2026.md               # 모델 비교 가이드 문서
+├── .venv/                                # Python 가상환경
+└── logs/                                 # 요청/응답 JSONL 로그 (자동 생성)
 ```
 
 ---
@@ -192,7 +191,10 @@ cd local-llm
 ### 2단계: 서버 시작
 
 ```bash
-# Qwen3.5 (기본, 긴 문서 모드)
+# Qwen3.6-27B (기본)
+./llm-server.sh
+
+# 1M 컨텍스트 모드
 ./llm-server.sh 1m
 
 # SuperGemma4
@@ -210,7 +212,7 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-### Qwen3.5 대화형 채팅
+### 대화형 채팅
 
 ```bash
 ./llm-chat.sh 1m
@@ -233,7 +235,7 @@ def fibonacci(n):
 
 ## 사용 모드별 가이드
 
-### 1. 대화형 채팅 (Qwen3.5 전용)
+### 1. 대화형 채팅
 
 ```bash
 ./llm-chat.sh           # 262K
@@ -249,38 +251,19 @@ def fibonacci(n):
 ./llm-chat.sh --system-prompt "한국어로만 답해줘"
 ```
 
-### 2. 단발 생성 (Qwen3.5)
+### 2. API 서버
 
-```bash
-source .venv/bin/activate
-
-mlx_lm.generate \
-  --model mlx-community/Qwen3.5-35B-A3B-4bit \
-  --prompt "Python으로 퀵소트 구현해줘" \
-  --max-tokens 500
-
-# Thinking 끄기
-mlx_lm.generate \
-  --model mlx-community/Qwen3.5-35B-A3B-4bit \
-  --prompt "안녕! /no_think" \
-  --max-tokens 200
-```
-
-### 3. API 서버
-
-OpenAI 호환 API 서버. FastAPI + mlx_lm Python API로 직접 추론.
+OpenAI 호환 API 서버. FastAPI + mlx_vlm Python API로 직접 추론.
 같은 네트워크의 다른 기기(맥미니 등)에서 접속 가능.
 
 ```bash
-# Qwen3.5
-./llm-server.sh              # 262K 컨텍스트, Thinking OFF
+# Qwen3.6-27B (기본)
+./llm-server.sh              # 262K 컨텍스트, Thinking OFF (기본)
 ./llm-server.sh 1m           # 1M 컨텍스트 (YaRN) ← 주로 이걸 씀
-./llm-server.sh --think      # Thinking ON (수학/코딩 정확도 향상)
-./llm-server.sh 1m --think   # 1M + Thinking ON
 ./llm-server.sh 262k 9090    # 포트 지정
 
 # SuperGemma4
-./llm-server.sh supergemma4          # 첫 실행 시 ~15GB 자동 다운로드
+./llm-server.sh supergemma4          # 첫 실행 시 ~16GB 자동 다운로드
 ./llm-server.sh supergemma4 9090     # 포트 지정
 ```
 
@@ -318,16 +301,31 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-#### 요청별 Thinking 제어 (Qwen3.5 전용)
+#### 이미지 포함 요청 (멀티모달)
 
 ```bash
-# 서버 기본값 OFF → 이 요청만 ON
+# 이미지 포함 요청 (base64)
 curl http://localhost:8080/v1/chat/completions \
-  -d '{"messages":[{"role":"user","content":"123*456=?"}],"enable_thinking":true,"max_tokens":500}'
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": [
+      {"type": "text", "text": "이 이미지를 설명해줘"},
+      {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+    ]}],
+    "max_tokens": 500
+  }'
+```
 
-# 서버 기본값 ON (--think) → 이 요청만 OFF
+#### 요청별 Thinking 제어
+
+```bash
+# 기본값 ON → 이 요청만 OFF
 curl http://localhost:8080/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"안녕!"}],"enable_thinking":false}'
+
+# thinking 블록 응답에 포함 (기본은 제거)
+curl http://localhost:8080/v1/chat/completions \
+  -d '{"messages":[{"role":"user","content":"123*456=?"}],"enable_thinking":true,"preserve_thinking":true,"max_tokens":500}'
 ```
 
 #### 지원 파라미터 (OpenAI 호환)
@@ -341,11 +339,13 @@ curl http://localhost:8080/v1/chat/completions \
 | `top_p` | float | 1.0 | Nucleus sampling |
 | `max_tokens` | int | 2048 | 최대 생성 토큰 |
 | `max_completion_tokens` | int | - | max_tokens 별칭 |
-| `stop` | string/array | null | 정지 시퀀스 |
-| `seed` | int | null | 결정적 샘플링 |
-| `presence_penalty` | float | 0 | 존재 패널티 |
-| `frequency_penalty` | float | 0 | 빈도 패널티 |
-| `enable_thinking` | bool | false | Thinking 모드 (Qwen3.5 전용) |
+| `stop` | string/array | null | 정지 시퀀스 (현재 미적용) |
+| `seed` | int | null | 결정적 샘플링 (OpenAI 호환용, 모델에 전달되지 않음) |
+| `presence_penalty` | float | 0 | 존재 패널티 (OpenAI 호환용, 모델에 전달되지 않음) |
+| `frequency_penalty` | float | 0 | 빈도 패널티 (OpenAI 호환용, 모델에 전달되지 않음) |
+| `repetition_penalty` | float | null | 반복 패널티 (파싱됨, 현재 모델에 전달되지 않음) |
+| `enable_thinking` | bool | true | Thinking 모드 (기본 ON, Qwen3.6 지원) |
+| `preserve_thinking` | bool | false | true 시 `<think>...</think>` 블록 응답에 포함 |
 
 #### 웹 UI 연동
 
@@ -364,7 +364,7 @@ curl http://<TAILSCALE_IP>:8080/v1/chat/completions ...
 #### 아키텍처
 
 ```
-클라이언트(:8080) → FastAPI 서버 (mlx_lm API 직접 호출)
+클라이언트(:8080) → FastAPI 서버 (mlx_vlm API 직접 호출)
 ```
 
 - 요청 완료 후 KV 캐시 자동 해제 (`mx.clear_cache()`)
@@ -403,17 +403,7 @@ cat logs/*.jsonl | jq -r '.ip' | sort | uniq -c | sort -rn
 cat logs/*.jsonl | jq 'select(.duration_ms > 3000)'
 ```
 
-### 5. 벤치마크 (Qwen3.5)
-
-```bash
-source .venv/bin/activate
-
-mlx_lm.benchmark \
-  --model mlx-community/Qwen3.5-35B-A3B-4bit \
-  --prompt-tokens 256 \
-  --generation-tokens 100 \
-  --num-trials 3
-```
+### 3. 벤치마크
 
 ### 커뮤니티 벤치마크 공유 (whatcani.run)
 
@@ -421,16 +411,16 @@ mlx_lm.benchmark \
 
 ```bash
 bunx whatcanirun run \
-  --model mlx-community/Qwen3.5-35B-A3B-4bit \
+  --model mlx-community/Qwen3.6-27B-6bit \
   --runtime mlx \
   --submit
 ```
 
 ---
 
-## 컨텍스트 프로필 시스템 (Qwen3.5 전용)
+## 컨텍스트 프로필 시스템
 
-> SuperGemma4는 128K 고정, 이 시스템 해당 없음.
+> SuperGemma4는 128K/256K 고정, 이 시스템 해당 없음.
 
 262K(기본)와 1M(확장) 두 가지 프로필. `config.json` 교체 방식으로 전환.
 
@@ -465,9 +455,11 @@ YaRN(Yet another RoPE extensioN)으로 위치 인코딩을 스케일링.
 
 ---
 
-## Thinking 모드 (Qwen3.5 전용)
+## Thinking 모드
 
 > SuperGemma4에서 `enable_thinking`을 보내도 오류는 없지만 무시됩니다. 서버가 자동 감지 처리.
+
+Qwen3.6-27B는 Thinking 기본 ON (DEFAULT_THINKING=True). `preserve_thinking=true` 요청 시 `<think>...</think>` 블록이 응답에 포함됩니다. 기본값(false)은 thinking 블록을 제거하고 최종 답변만 반환합니다.
 
 ### Thinking ON
 
@@ -487,8 +479,9 @@ YaRN(Yet another RoPE extensioN)으로 위치 인코딩을 스케일링.
 |------|------|:---:|
 | `llm-chat.sh` (대화형) | 프롬프트에 `/no_think` 추가 | O |
 | `llm-server.sh` (API) | 기본값 Thinking OFF | O |
-| `llm-server.sh --think` (API) | 기본값 Thinking ON | O |
+| `llm-server.sh --think` (API) | --think 명시 (Thinking ON) | O |
 | API 요청 `enable_thinking` | **요청별 제어 가능** | **O** |
+| API 요청 `preserve_thinking` | **thinking 블록 포함 여부** | **O** |
 
 ### 언제 켜고 끌까?
 
@@ -536,15 +529,13 @@ YaRN(Yet another RoPE extensioN)으로 위치 인코딩을 스케일링.
 alias llm-chat='/path/to/local-llm/llm-chat.sh'
 alias llm-server='/path/to/local-llm/llm-server.sh'
 alias llm-gemma='/path/to/local-llm/llm-server.sh supergemma4'
-alias llm-gen='/path/to/local-llm/.venv/bin/mlx_lm.generate --model mlx-community/Qwen3.5-35B-A3B-4bit'
-alias llm-bench='/path/to/local-llm/.venv/bin/mlx_lm.benchmark --model mlx-community/Qwen3.5-35B-A3B-4bit'
 ```
 
 ```bash
 source ~/.zshrc
 
-llm-chat 1m              # Qwen3.5 1M 채팅
-llm-server 1m            # Qwen3.5 API 서버
+llm-chat 1m              # Qwen3.6-27B 1M 채팅
+llm-server 1m            # Qwen3.6-27B API 서버
 llm-gemma                # SuperGemma4 API 서버
 ```
 
@@ -555,7 +546,7 @@ llm-gemma                # SuperGemma4 API 서버
 | 상태 | 메모리 사용 |
 |------|--------:|
 | 미실행 | ~21GB (시스템) |
-| Qwen3.5 실행 중 | ~41GB |
+| Qwen3.6-27B 실행 중 | ~44GB |
 | SuperGemma4 실행 중 | ~36GB |
 | Ctrl+C 종료 후 | ~21GB (**즉시 해제**) |
 
@@ -584,29 +575,25 @@ brew install llmfit
 
 llmfit system                                    # 시스템 사양 확인
 llmfit fit                                       # 호환 모델 전체 추천
-llmfit search qwen3.5                            # 특정 모델 검색
-llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B  # 두 모델 비교
+llmfit search qwen3.6                            # 특정 모델 검색
+llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.5-27B-4bit  # 두 모델 비교
 ```
 
-### M5 Pro 64GB 추천 결과 (2026-03-22)
+### M5 Pro 64GB 추천 결과 (2026-03-22 기준)
 
 | 상태 | 모델 | Score | tok/s | 메모리% |
 |:---:|------|:---:|------:|------:|
 | Good | Qwen3-Coder-Next 80B-A3B | 99 | 105 | 64% |
 | Perfect | Qwen3.5-122B-A10B (NVFP4) | 96 | 62 | 52% |
-| **Perfect** | **Qwen3.5-35B-A3B** | **92** | **105** | **29%** |
 | Perfect | GPT-OSS 20B | 91 | 64 | 17% |
 
 ---
 
 ## 성능 테스트 결과
 
-### Qwen3.5-35B-A3B (2026-03-22, M5 Pro 64GB)
+### Qwen3.6-27B-6bit
 
-| 테스트 | 프롬프트 처리 | 생성 속도 | 피크 메모리 |
-|-------|----------:|--------:|--------:|
-| 한국어 인사 | 171 tok/s | 103 tok/s | 19.6GB |
-| 영어 질문 | 122 tok/s | 104 tok/s | 19.6GB |
+> 측정 예정
 
 ### SuperGemma4-26B (공개 벤치마크 기준)
 
@@ -628,49 +615,47 @@ llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B  # 두 모델 비교
 |---|---|---|
 | **속도** | 빠름 (활성 파라미터만 추론) | 느림 (전체 파라미터 추론) |
 | **메모리 효율** | 높음 | 낮음 |
-| **64GB 최적** | ✅ **Qwen3.5-35B-A3B (29%)** | Llama-3.3-70B (~70%, 빡빡) |
+| **64GB 예시** | SuperGemma4-26B (~13GB, MoE) | ✅ **Qwen3.6-27B-6bit (~23GB, Dense)** |
 
 ### Apple Silicon 메모리별 추천
 
 | 메모리 | 추천 모델 | 메모리 사용 | 예상 속도 |
 |------:|---------|--------:|--------:|
-| **16GB** | Qwen3.5-9B (Q4) | ~6GB | 40+ tok/s |
-| **24GB** | Qwen3.5-35B-A3B (Q3) | ~18GB | 80+ tok/s |
-| **32GB** | Qwen3.5-35B-A3B (Q4) | ~22GB | 100+ tok/s |
-| **64GB** | **Qwen3.5-35B-A3B (Q4)** — MoE 가성비 최적 | ~22GB | **103 tok/s** |
+| **24GB** | Qwen3.6-27B-6bit | ~23GB | 미측정 |
+| **32GB** | Qwen3.6-27B-6bit | ~23GB | 미측정 |
+| **64GB** | **Qwen3.6-27B-6bit** — 멀티모달+Thinking | ~23GB | 미측정 |
 | **128GB** | Qwen3.5-122B-A10B (Q4) | ~70GB | ~15 tok/s |
 
 ### 용도별 추천
 
 | 용도 | 추천 모델 | 이유 |
 |------|---------|------|
-| 한국어 + 코딩 올라운더 | **Qwen3.5-35B-A3B** | 속도+품질+메모리 밸런스 |
-| 무검열 + 툴콜 강화 | **SuperGemma4 26B** 🔥 | 완전 무검열, 128K, 15GB |
-| 긴 컨텍스트 메모리 절약 | **Qwen3.5-35B-A3B 1M** | YaRN으로 200만 글자 |
+| 멀티모달 + 한국어 + 코딩 | **Qwen3.6-27B-6bit** | 이미지+텍스트, Thinking ON, 23GB |
+| 무검열 + 툴콜 강화 | **SuperGemma4 26B** | 완전 무검열, 128K, 15GB |
+| 긴 컨텍스트 | **Qwen3.6-27B 1M** | YaRN으로 200만 글자 |
 | 코딩 에이전트 | Qwen3-Coder-Next 80B-A3B | SWE-bench 최강 |
 | 코딩 품질 최우선 | Qwen3.5-27B (Dense) | SWE 72.4, LiveCode 80.7 |
 | 에이전트/도구 호출 | Qwen3.5-122B-A10B | BFCL 72.2 (128GB 필요) |
-| 가볍고 빠르게 | Qwen3.5-9B | 6GB, 40+ tok/s |
 
 ### 벤치마크 비교
 
-| 벤치마크 | 35B-A3B | SuperGemma4¹ | 27B | 122B-A10B | GPT-5 mini | Claude Sonnet 4.5 |
-|---------|:-------:|:------------:|:---:|:---------:|:---------:|:-----------------:|
-| MMLU-Pro | 85.3 | 82.6 | 86.1 | **86.7** | 83.7 | 80.8 |
-| SWE-bench | 69.2 | - | **72.4** | 72.0 | 72.0 | 62.0 |
-| LiveCodeBench | 74.6 | 77.1 | **80.7** | 78.9 | 80.5 | 82.7 |
-| BFCL-V4 (도구) | 67.3 | 툴콜 2배↑² | 68.5 | **72.2** | 55.5 | 54.8 |
-| GPQA Diamond | - | **82.3** | - | - | - | - |
-| 생성 속도 (MLX) | **103 tok/s** | ~46 tok/s | ~15 tok/s | - | - | - |
+| 벤치마크 | Qwen3.6-27B-6bit | SuperGemma4¹ | Qwen3.5-27B | Qwen3.5-122B-A10B | GPT-5 mini | Claude Sonnet 4.5 |
+|---------|:----------------:|:------------:|:-----------:|:-----------------:|:---------:|:-----------------:|
+| MMLU-Pro | 86.2 | 82.6 | 86.1 | **86.7** | 83.7 | 80.8 |
+| SWE-bench (Verified) | **77.2** | - | 72.4 | 72.0 | 72.0 | 62.0 |
+| LiveCodeBench v6 | 83.9 | 77.1 | **80.7** | 78.9 | 80.5 | 82.7 |
+| BFCL-V4 (도구) | 미측정 | 툴콜 2배↑² | 68.5 | **72.2** | 55.5 | 54.8 |
+| GPQA Diamond | **87.8** | 82.3 | - | - | - | - |
+| 생성 속도 (MLX) | ~45~55 tok/s³ | ~46 tok/s | ~15 tok/s | - | - | - |
 
-> ¹ Gemma 4 26B-it 공식 벤치마크 기준. ² 자체 측정, 독립 검증 미완료.
+> ¹ Gemma 4 26B-it 공식 벤치마크 기준. ² 자체 측정, 독립 검증 미완료. ³ M5 Pro 64GB 추정치 (메모리 대역폭 153 GB/s 기반), 실측 예정.
 
 ---
 
 ## 테스트
 
 ```bash
-# API 서버 테스트 (13개, mock 모델 — GPU 불필요)
+# API 서버 테스트 (22개, mock 모델 — GPU 불필요)
 .venv/bin/python -m pytest test_api_server.py -v
 ```
 
@@ -678,9 +663,11 @@ llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B  # 두 모델 비교
 |---------|-------|---------|
 | Models | list_models | GET /v1/models 응답 형식 |
 | Chat | basic_request | OpenAI 호환 응답 (id, choices, usage) |
-| Chat | enable_thinking | Qwen3.5 Thinking ON/OFF 조건부 처리 |
+| Chat | enable_thinking | mlx-vlm Thinking ON/OFF 처리 |
+| Chat | preserve_thinking | thinking 블록 포함/제거 동작 |
 | Chat | custom_parameters | temperature, top_p, max_tokens |
 | Chat | max_completion_tokens | OpenAI 신규 파라미터 호환 |
+| Chat | image_input | 멀티모달 이미지 입력 처리 |
 | Stream | stream_format | SSE content-type, chunk 형식 |
 | Stream | stream_chunks | role → content → finish_reason → [DONE] |
 | RateLimit | queue_full | 큐 초과 시 429 응답 |
@@ -690,12 +677,10 @@ llmfit diff Qwen/Qwen3.5-35B-A3B Qwen/Qwen3.5-27B  # 두 모델 비교
 
 ## 참고 링크
 
-- [MLX-LM GitHub](https://github.com/ml-explore/mlx-examples/tree/main/llms)
-- [Qwen3.5-35B-A3B (MLX 4bit)](https://huggingface.co/mlx-community/Qwen3.5-35B-A3B-4bit)
+- [MLX-VLM GitHub](https://github.com/Blaizzy/mlx-vlm)
+- [Qwen3.6-27B-6bit (MLX Community)](https://huggingface.co/mlx-community/Qwen3.6-27B-6bit)
 - [Qwen3.5-122B-A10B (MLX 4bit)](https://huggingface.co/mlx-community/Qwen3.5-122B-A10B-4bit)
-- [Qwen3.5 공식 GitHub](https://github.com/QwenLM/Qwen3.5)
-- [Qwen3.5 로컬 가이드 (Unsloth)](https://unsloth.ai/docs/models/qwen3.5)
-- [Unsloth GGUF Benchmarks](https://unsloth.ai/docs/models/qwen3.5/gguf-benchmarks)
+- [Qwen3.6 공식 HuggingFace](https://huggingface.co/Qwen/Qwen3.6-27B)
 - [SuperGemma4 26B uncensored MLX 4bit (v2)](https://huggingface.co/Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2)
 - [SuperGemma4 26B abliterated multimodal MLX 4bit](https://huggingface.co/Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit)
 - [SuperGemma4 26B uncensored GGUF v2](https://huggingface.co/Jiunsong/supergemma4-26b-uncensored-gguf-v2)
