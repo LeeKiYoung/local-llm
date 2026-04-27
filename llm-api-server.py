@@ -251,9 +251,11 @@ def run_inference(params):
         chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
     )
 
-    # 추론 전 캐시 해제: 이전 요청이 비정상 종료되었을 때 잔류 GPU 메모리를 비운다.
-    # Metal은 프리필 도중 OOM이 발생하면 C-level abort()를 호출하므로
-    # 사전 해제로 사용 가능한 GPU 메모리를 최대화한다.
+    # 추론 전 Metal 동기화 후 캐시 해제:
+    # mx.synchronize()로 이전 요청의 inflight Metal 커맨드 버퍼가 모두 완료될 때까지 대기한 뒤
+    # 캐시를 해제한다. synchronize() 없이 clear_cache()만 호출하면 아직 실행 중인 버퍼가
+    # 해제된 메모리를 참조해 Metal assertion(addCompletedHandler after commit)이 발생한다.
+    mx.synchronize()
     mx.clear_cache()
 
     # mlx_vlm.generate()는 sampler 오브젝트 불필요 — temp/top_p 직접 전달 (per RESEARCH Pitfall 2)
@@ -279,6 +281,7 @@ def run_inference(params):
     if not params.get("preserve_thinking"):
         full_text = strip_thinking(full_text)
 
+    mx.synchronize()
     mx.clear_cache()
     return full_text, finish_reason, prompt_tokens, completion_tokens
 
@@ -299,9 +302,8 @@ def run_inference_streaming(params):
         chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
     )
 
-    # 추론 전 캐시 해제: 이전 요청이 비정상 종료되었을 때 잔류 GPU 메모리를 비운다.
-    # Metal은 프리필 도중 OOM이 발생하면 C-level abort()를 호출하므로
-    # 사전 해제로 사용 가능한 GPU 메모리를 최대화한다.
+    # 추론 전 Metal 동기화 후 캐시 해제 (run_inference와 동일한 이유)
+    mx.synchronize()
     mx.clear_cache()
 
     try:
@@ -316,9 +318,8 @@ def run_inference_streaming(params):
         ):
             yield response
     finally:
-        # stream_generate()가 정상 종료되든 예외를 던지든 반드시 캐시를 해제한다.
-        # 예외 없이 완료된 경우에도 이 finally가 실행되므로 이중 호출이 되지만
-        # mx.clear_cache()는 멱등(idempotent)이므로 안전하다.
+        # stream_generate()가 정상 종료되든 예외를 던지든 반드시 동기화 후 캐시를 해제한다.
+        mx.synchronize()
         mx.clear_cache()
 
 
