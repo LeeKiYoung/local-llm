@@ -480,6 +480,11 @@ def _stream_response(req_id, params, ip, start, last_msg):
 
                 loop.run_in_executor(None, _produce)
 
+                # preserve_thinking=False: </think> 나올 때까지 버퍼링 후 이후만 yield
+                # preserve_thinking=True: 버퍼링 없이 바로 pass-through
+                think_buf = ""
+                thinking_done = bool(params.get("preserve_thinking"))
+
                 while True:
                     item = await queue.get()
                     if isinstance(item, Exception):
@@ -497,12 +502,24 @@ def _stream_response(req_id, params, ip, start, last_msg):
                     if item_finish == "length" or completion_tokens >= params["max_tokens"]:
                         finish_reason = "length"
 
-                    yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': item.text}))}\n\n"
+                    if thinking_done:
+                        yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': item.text}))}\n\n"
+                    else:
+                        # Qwen3.6-27B: chat template이 <think>를 prefix로 주입하므로
+                        # 생성 텍스트에는 </think>만 나옴 — 청크 경계 걸쳐도 buf 누적으로 처리
+                        think_buf += item.text
+                        if "</think>" in think_buf:
+                            thinking_done = True
+                            after = think_buf.split("</think>", 1)[1]
+                            if after:
+                                yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': after}))}\n\n"
 
-                # preserve_thinking=False일 때 full_text에서 <think> 블록 제거 (per D-19)
-                # 주의: SSE 청크는 이미 yield됐으므로 content_preview 로그에만 영향 (알려진 제한)
-                if not params.get("preserve_thinking"):
-                    full_text = strip_thinking(full_text)
+                # </think>가 끝내 안 나온 경우 (thinking 없는 응답이거나 max_tokens 초과로 잘림)
+                # 버퍼 전체를 한 번에 yield해 regression 방지
+                if not thinking_done and think_buf:
+                    yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': think_buf}))}\n\n"
+
+                full_text = strip_thinking(full_text)
 
                 # 최종 청크
                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {}, finish_reason))}\n\n"
