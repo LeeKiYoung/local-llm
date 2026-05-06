@@ -28,6 +28,8 @@ import io
 from PIL import Image
 from mlx_vlm import load, generate, stream_generate
 from mlx_vlm.prompt_utils import apply_chat_template
+from mlx_vlm.generate import PromptCacheState
+from mlx_vlm.vision_cache import VisionFeatureCache
 
 # 압축 폭탄(decompression bomb) 방지 — 50MP 이상 이미지 거부 (PIL 기본값 약 178MP)
 Image.MAX_IMAGE_PIXELS = 50_000_000
@@ -42,6 +44,9 @@ pending = 0
 MAX_QUEUE = 5
 LOG_DIR = ""
 DEFAULT_THINKING = False
+prompt_cache_state = None   # KV-캐시 재사용 (PromptCacheState, 턴 간 프리필 절감)
+vision_cache = None         # 비전 피처 캐시 (VisionFeatureCache, 동일 이미지 재인코딩 방지)
+PREFILL_STEP_SIZE = 512     # 청크 프리필 크기 (토큰) — 낮을수록 OOM 위험 감소
 
 # 대형 프리필 경고 임계값 (토큰 수 추정치 기준, 실제 토큰화 전 문자 수 / 3.5 근사)
 # 100K 토큰 이상이면 Metal OOM 위험을 콘솔에 경고한다
@@ -267,6 +272,9 @@ def run_inference(params):
         max_tokens=params["max_tokens"],
         temp=params["temperature"],
         top_p=params["top_p"],
+        prompt_cache_state=prompt_cache_state,
+        vision_cache=vision_cache,
+        prefill_step_size=PREFILL_STEP_SIZE,
     )
 
     full_text = result.text
@@ -315,6 +323,9 @@ def run_inference_streaming(params):
             max_tokens=params["max_tokens"],
             temp=params["temperature"],
             top_p=params["top_p"],
+            prompt_cache_state=prompt_cache_state,
+            vision_cache=vision_cache,
+            prefill_step_size=PREFILL_STEP_SIZE,
         ):
             yield response
     finally:
@@ -489,7 +500,8 @@ def _stream_response(req_id, params, ip, start, last_msg):
 
 # ── 메인 ─────────────────────────────────────────
 def main():
-    global model, processor, model_id, gpu_semaphore, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING
+    global model, processor, model_id, gpu_semaphore, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING, \
+           prompt_cache_state, vision_cache
 
     parser = argparse.ArgumentParser(description="Local LLM API Server")
     parser.add_argument("--model", type=str, default="mlx-community/Qwen3.6-27B-6bit")
@@ -509,6 +521,8 @@ def main():
 
     print(f"📥 모델 로딩: {model_id}")
     model, processor = load(model_id)
+    prompt_cache_state = PromptCacheState()
+    vision_cache = VisionFeatureCache()
     print(f"✅ 모델 로드 완료")
     print()
     print(f"🌐 API 서버: http://{args.host}:{args.port}")
