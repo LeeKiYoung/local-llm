@@ -293,7 +293,7 @@ def run_inference(params):
         max_tokens=params["max_tokens"],
         temp=params["temperature"],
         top_p=params["top_p"],
-        prompt_cache_state=prompt_cache_state,
+        prompt_cache_state=None if images else prompt_cache_state,
         vision_cache=vision_cache,
         prefill_step_size=PREFILL_STEP_SIZE,
     )
@@ -310,6 +310,9 @@ def run_inference(params):
     if not params.get("preserve_thinking"):
         full_text = strip_thinking(full_text)
 
+    if images:
+        prompt_cache_state.cache = None
+        prompt_cache_state.token_ids = None
     _eval_kv_cache(prompt_cache_state)
     mx.synchronize()
     mx.clear_cache()
@@ -344,13 +347,16 @@ def run_inference_streaming(params):
             max_tokens=params["max_tokens"],
             temp=params["temperature"],
             top_p=params["top_p"],
-            prompt_cache_state=prompt_cache_state,
+            prompt_cache_state=None if images else prompt_cache_state,
             vision_cache=vision_cache,
             prefill_step_size=PREFILL_STEP_SIZE,
         ):
             yield response
     finally:
         # stream_generate() 완료 후 KV 캐시 고정 → Metal 동기화 → 임시 버퍼 해제
+        if images:
+            prompt_cache_state.cache = None
+            prompt_cache_state.token_ids = None
         _eval_kv_cache(prompt_cache_state)
         mx.synchronize()
         mx.clear_cache()
