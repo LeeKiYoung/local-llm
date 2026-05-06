@@ -206,6 +206,11 @@ def get_prompt_preview(messages):
 def strip_thinking(text):
     """<think>...</think> 블록 제거 — preserve_thinking=False일 때만 호출 (CORE-06)"""
     import re
+    # Qwen3.6-27B: chat template이 <think>를 프롬프트 prefix로 주입하므로
+    # 생성 텍스트에는 </think> 끝 태그만 나옴 — split으로 이후 텍스트 추출.
+    # </think>가 없으면(max_tokens 초과로 잘린 경우) 기존 정규식 폴백.
+    if "</think>" in text:
+        return text.split("</think>", 1)[1].strip()
     return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
 
 
