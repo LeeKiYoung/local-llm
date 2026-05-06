@@ -323,7 +323,8 @@ curl http://<TAILSCALE_IP>:8080/v1/chat/completions ...
 - 대기 큐 5개 초과 시 429 응답 (OOM 방지)
 - **Prompt KV 캐시 재사용** — 멀티턴 대화에서 공통 prefix 스킵, 두 번째 턴부터 TTFT 단축 (`PromptCacheState`)
 - **Vision 인코더 캐시** — 같은 이미지 재전송 시 비전 인코더 스킵 ~1-2초 절약 (`VisionFeatureCache`)
-- Metal GPU 임시 버퍼는 요청 완료 후 해제 (`mx.clear_cache()`), KV 캐시는 보존
+- **Prefill 청크 최적화** — 긴 프롬프트를 512토큰 청크로 나눠 Metal 커널 효율 향상 (`prefill_step_size`)
+- Metal GPU 임시 버퍼는 요청 완료 후 해제 (`mx.clear_cache()`), KV 캐시 배열은 eval 후 보존
 
 ### 3. 로깅
 
