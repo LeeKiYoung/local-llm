@@ -297,7 +297,7 @@ curl http://localhost:8080/v1/chat/completions \
 | `frequency_penalty` | float | 0 | 빈도 패널티 (OpenAI 호환용, 모델에 전달되지 않음) |
 | `repetition_penalty` | float | null | 반복 패널티 (파싱됨, 현재 모델에 전달되지 않음) |
 | `enable_thinking` | bool | false | Thinking 모드 (기본 OFF, 요청별 ON 가능, Qwen3.6-27B 지원) |
-| `preserve_thinking` | bool | false | true 시 `<think>...</think>` 블록 응답에 포함 |
+| `preserve_thinking` | bool | false | true 시 thinking 텍스트 그대로 포함, false 시 `</think>` 이후 답변만 반환 |
 
 #### 웹 UI 연동
 
@@ -401,7 +401,9 @@ YaRN(Yet another RoPE extensioN)으로 위치 인코딩을 스케일링.
 
 > Qwen3.6-27B 전용. SuperGemma4에서 `enable_thinking`을 보내도 오류는 없지만 무시됩니다. 서버가 자동 감지 처리.
 
-Qwen3.6-27B는 Thinking 기본 OFF (DEFAULT_THINKING=False). 요청 시 enable_thinking=true로 ON 가능. `preserve_thinking=true` 요청 시 `<think>...</think>` 블록이 응답에 포함됩니다. 기본값(false)은 thinking 블록을 제거하고 최종 답변만 반환합니다.
+Qwen3.6-27B는 Thinking 기본 OFF (DEFAULT_THINKING=False). 요청 시 enable_thinking=true로 ON 가능. `preserve_thinking=true` 요청 시 thinking 텍스트가 응답에 포함됩니다. 기본값(false)은 thinking 블록을 제거하고 최종 답변만 반환합니다.
+
+> **동작 메커니즘**: Qwen3.6-27B는 chat template이 `<think>` 시작 태그를 프롬프트 prefix로 자동 주입합니다. 따라서 모델 생성 텍스트에는 `</think>` 끝 태그만 나타나며, `<think>...</think>` 완성 형태로 생성되지 않습니다. `preserve_thinking=false`(기본값) 시 서버가 `</think>` 기준으로 이전 내용을 모두 제거하고 이후 답변 텍스트만 반환합니다. 스트리밍(`stream=true`)에서도 동일하게 `</think>` 나올 때까지 청크를 버퍼링하고 이후 청크부터 클라이언트에 전달합니다.
 
 ### Thinking ON
 
