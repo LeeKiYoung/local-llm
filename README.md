@@ -128,8 +128,9 @@ local-llm/
 ├── profiles/
 │   ├── config-qwen36-27b-262k.json       # 기본 프로필 (262K, Qwen3.6-27B)
 │   └── config-qwen36-27b-1m.json         # 확장 프로필 (1M YaRN, Qwen3.6-27B)
-├── test_api_server.py                    # API 서버 테스트 (22개)
-├── test_proxy.py                         # 프록시 테스트
+├── tests/
+│   ├── test_api_server.py                # API 서버 테스트 (33개)
+│   └── test_proxy.py                     # 프록시 테스트
 ├── local-llm-guide-2026.md               # 모델 비교 가이드 문서
 ├── .venv/                                # Python 가상환경
 └── logs/                                 # 요청/응답 JSONL 로그 (자동 생성)
@@ -318,9 +319,11 @@ curl http://<TAILSCALE_IP>:8080/v1/chat/completions ...
 클라이언트(:8080) → FastAPI 서버 (mlx_vlm API 직접 호출)
 ```
 
-- 요청 완료 후 KV 캐시 자동 해제 (`mx.clear_cache()`)
 - `asyncio.Semaphore(1)` — GPU 순차 처리, HTTP는 동시 수신
 - 대기 큐 5개 초과 시 429 응답 (OOM 방지)
+- **Prompt KV 캐시 재사용** — 멀티턴 대화에서 공통 prefix 스킵, 두 번째 턴부터 TTFT 단축 (`PromptCacheState`)
+- **Vision 인코더 캐시** — 같은 이미지 재전송 시 비전 인코더 스킵 ~1-2초 절약 (`VisionFeatureCache`)
+- Metal GPU 임시 버퍼는 요청 완료 후 해제 (`mx.clear_cache()`), KV 캐시는 보존
 
 ### 3. 로깅
 
@@ -661,8 +664,8 @@ llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # 두
 ## 테스트
 
 ```bash
-# API 서버 테스트 (22개, mock 모델 — GPU 불필요)
-.venv/bin/python -m pytest test_api_server.py -v
+# API 서버 테스트 (33개, mock 모델 — GPU 불필요)
+.venv/bin/python -m pytest tests/test_api_server.py -v
 ```
 
 | 카테고리 | 테스트 | 검증 내용 |
