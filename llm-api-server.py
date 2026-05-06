@@ -53,6 +53,28 @@ PREFILL_STEP_SIZE = 512     # 청크 프리필 크기 (토큰) — 낮을수록 
 _LARGE_PREFILL_CHAR_THRESHOLD = 350_000  # ~100K 토큰
 
 
+def _eval_kv_cache(cache_state):
+    """prompt_cache_state의 KV 배열을 mx.clear_cache() 전에 evaluate해서 Metal에 고정.
+
+    lazy 상태의 KV 배열이 clear_cache() 후 재사용될 때 command buffer 충돌을 방지한다.
+    """
+    if cache_state is None or cache_state.cache is None:
+        return
+    try:
+        arrays = []
+        for c in cache_state.cache:
+            if hasattr(c, 'keys') and c.keys is not None:
+                arrays.append(c.keys)
+            if hasattr(c, 'values') and c.values is not None:
+                arrays.append(c.values)
+            if hasattr(c, 'state'):
+                arrays.append(c.state)
+        if arrays:
+            mx.eval(*arrays)
+    except Exception:
+        pass
+
+
 # ── 로깅 ─────────────────────────────────────────
 def get_log_file():
     date = datetime.now().strftime("%Y-%m-%d")
@@ -256,12 +278,11 @@ def run_inference(params):
         chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
     )
 
-    # 추론 전 Metal 동기화 후 캐시 해제:
-    # mx.synchronize()로 이전 요청의 inflight Metal 커맨드 버퍼가 모두 완료될 때까지 대기한 뒤
-    # 캐시를 해제한다. synchronize() 없이 clear_cache()만 호출하면 아직 실행 중인 버퍼가
-    # 해제된 메모리를 참조해 Metal assertion(addCompletedHandler after commit)이 발생한다.
+    # 추론 전 Metal 동기화: inflight 커맨드 버퍼가 모두 완료될 때까지 대기.
+    # clear_cache()는 여기서 호출하지 않음 — prompt_cache_state.cache의 KV 배열이
+    # lazy 상태일 때 Metal 버퍼가 해제되면 다음 재사용 시 command buffer 충돌이 발생.
+    # (이전 요청 finally 블록에서 이미 clear_cache() 처리됨)
     mx.synchronize()
-    mx.clear_cache()
 
     # mlx_vlm.generate()는 sampler 오브젝트 불필요 — temp/top_p 직접 전달 (per RESEARCH Pitfall 2)
     result = generate(
@@ -289,6 +310,7 @@ def run_inference(params):
     if not params.get("preserve_thinking"):
         full_text = strip_thinking(full_text)
 
+    _eval_kv_cache(prompt_cache_state)
     mx.synchronize()
     mx.clear_cache()
     return full_text, finish_reason, prompt_tokens, completion_tokens
@@ -310,9 +332,8 @@ def run_inference_streaming(params):
         chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
     )
 
-    # 추론 전 Metal 동기화 후 캐시 해제 (run_inference와 동일한 이유)
+    # 추론 전 Metal 동기화 (clear_cache는 생략 — KV 캐시 보존 필요, Change 1 주석 참조)
     mx.synchronize()
-    mx.clear_cache()
 
     try:
         for response in stream_generate(
@@ -329,7 +350,8 @@ def run_inference_streaming(params):
         ):
             yield response
     finally:
-        # stream_generate()가 정상 종료되든 예외를 던지든 반드시 동기화 후 캐시를 해제한다.
+        # stream_generate() 완료 후 KV 캐시 고정 → Metal 동기화 → 임시 버퍼 해제
+        _eval_kv_cache(prompt_cache_state)
         mx.synchronize()
         mx.clear_cache()
 
