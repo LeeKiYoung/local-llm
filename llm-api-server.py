@@ -485,9 +485,10 @@ def _ensure_mlx_streams():
     같은 스레드 재사용 시 중복 생성 방지를 위해 thread-local 플래그로 1회만 실행.
     """
     if not getattr(_thread_local, 'mlx_ready', False):
-        mx.default_stream(mx.default_device())  # stream(gpu, 0)
-        mx.new_stream(mx.default_device())       # stream(gpu, 1)
-        mx.new_stream(mx.default_device())       # stream(gpu, 2) — async_eval 전용
+        # 스트림 객체를 thread-local에 보관해야 GC로 소멸되지 않음
+        _thread_local.s0 = mx.default_stream(mx.default_device())  # stream(gpu, 0)
+        _thread_local.s1 = mx.new_stream(mx.default_device())       # stream(gpu, 1)
+        _thread_local.s2 = mx.new_stream(mx.default_device())       # stream(gpu, 2) — async_eval 전용
         _thread_local.mlx_ready = True
 
 
