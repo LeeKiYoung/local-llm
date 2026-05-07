@@ -12,6 +12,7 @@ FastAPI + mlx_vlm Python API 직접 호출
 
 import argparse
 import asyncio
+import concurrent.futures
 import json
 import os
 import time
@@ -34,13 +35,12 @@ from mlx_vlm.vision_cache import VisionFeatureCache
 # 압축 폭탄(decompression bomb) 방지 — 50MP 이상 이미지 거부 (PIL 기본값 약 178MP)
 Image.MAX_IMAGE_PIXELS = 50_000_000
 
-# MLX 0.31.2: async_eval은 thread-local stream(gpu,2)를 요구하는데
-# ThreadPoolExecutor worker 스레드에서 그 스트림을 만들 수 없음.
-# async_eval은 Python/GPU 오버랩 최적화일 뿐 — 순차 토큰 생성 서버에서
-# eval로 대체해도 성능 차이 없음.
-mx.async_eval = mx.eval
-
 # ── 글로벌 ────────────────────────────────────────
+# MLX 0.31.2: stream이 thread-local이므로 모델 로드와 모든 추론을 같은 스레드에서 실행해야 함.
+# max_workers=1 executor에서 모델 로드 → 그 스레드에 stream(gpu,0/1/2) 자연 생성.
+# 이후 모든 inference도 같은 executor 사용 → stream 문제 없음.
+_gpu_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
 app = FastAPI()
 model = None
 processor = None
@@ -396,6 +396,27 @@ def _run_inference_streaming_inner(params):
         mx.clear_cache()
 
 
+# ── 앱 시작 ──────────────────────────────────────
+@app.on_event("startup")
+async def _startup():
+    """모델을 _gpu_executor 스레드에서 로드 — 해당 스레드에 MLX 스트림 자연 초기화."""
+    global gpu_semaphore, model, processor, prompt_cache_state, vision_cache
+    gpu_semaphore = asyncio.Semaphore(1)
+    loop = asyncio.get_running_loop()
+
+    def _do_load():
+        m, p = load(model_id)
+        pcs = PromptCacheState()
+        vc = VisionFeatureCache()
+        return m, p, pcs, vc
+
+    print(f"📥 모델 로딩: {model_id}")
+    model, processor, prompt_cache_state, vision_cache = await loop.run_in_executor(
+        _gpu_executor, _do_load
+    )
+    print(f"✅ 모델 로드 완료")
+
+
 # ── 엔드포인트 ────────────────────────────────────
 @app.get("/v1/models")
 async def list_models():
@@ -452,7 +473,7 @@ async def chat_completions(request: Request):
         async with gpu_semaphore:
             loop = asyncio.get_running_loop()
             text, finish_reason, p_tokens, c_tokens = await loop.run_in_executor(
-                None, partial(run_inference, params)
+                _gpu_executor, partial(run_inference, params)
             )
     finally:
         pending -= 1
@@ -507,7 +528,7 @@ def _stream_response(req_id, params, ip, start, last_msg):
                         # 예외를 삼키지 않고 소비 측에 전파 (WR-04)
                         loop.call_soon_threadsafe(queue.put_nowait, e)
 
-                loop.run_in_executor(None, _produce)
+                loop.run_in_executor(_gpu_executor, _produce)
 
                 # preserve_thinking=False: </think> 나올 때까지 버퍼링 후 이후만 yield
                 # preserve_thinking=True: 버퍼링 없이 바로 pass-through
@@ -579,8 +600,7 @@ def _stream_response(req_id, params, ip, start, last_msg):
 
 # ── 메인 ─────────────────────────────────────────
 def main():
-    global model, processor, model_id, gpu_semaphore, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING, \
-           prompt_cache_state, vision_cache, DRAFT_KIND, DRAFT_BLOCK_SIZE, _MTP_SUPPORTED
+    global model_id, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING, DRAFT_KIND, DRAFT_BLOCK_SIZE, _MTP_SUPPORTED
 
     parser = argparse.ArgumentParser(description="Local LLM API Server")
     parser.add_argument("--model", type=str, default="mlx-community/Qwen3.6-27B-6bit")
@@ -602,7 +622,6 @@ def main():
     DEFAULT_THINKING = args.think
     DRAFT_KIND = None if args.no_draft else args.draft_kind
     DRAFT_BLOCK_SIZE = args.draft_block_size
-    gpu_semaphore = asyncio.Semaphore(1)
     LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
     os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -620,11 +639,6 @@ def main():
         print("   MTP 비활성화 상태로 계속합니다.")
         DRAFT_KIND = None
 
-    print(f"📥 모델 로딩: {model_id}")
-    model, processor = load(model_id)
-    prompt_cache_state = PromptCacheState()
-    vision_cache = VisionFeatureCache()
-    print(f"✅ 모델 로드 완료")
     print()
     print(f"🌐 API 서버: http://{args.host}:{args.port}")
     print(f"   엔드포인트: /v1/chat/completions")
