@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import json
 import os
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -270,10 +271,8 @@ def make_chunk(req_id, model_name, delta, finish_reason=None):
 
 # ── 추론 ─────────────────────────────────────────
 def run_inference(params):
-    # MLX 0.31.2+: GPU 스트림이 thread-local — executor worker thread에서 스트림 초기화 필수
-    _stream = mx.default_stream(mx.default_device())
-    with mx.stream(_stream):
-        return _run_inference_inner(params)
+    _ensure_mlx_streams()
+    return _run_inference_inner(params)
 
 
 def _run_inference_inner(params):
@@ -341,10 +340,8 @@ def _run_inference_inner(params):
 
 
 def run_inference_streaming(params):
-    # MLX 0.31.2+: thread-local GPU 스트림 초기화
-    _stream = mx.default_stream(mx.default_device())
-    with mx.stream(_stream):
-        yield from _run_inference_streaming_inner(params)
+    _ensure_mlx_streams()
+    yield from _run_inference_streaming_inner(params)
 
 
 def _run_inference_streaming_inner(params):
@@ -477,6 +474,21 @@ async def chat_completions(request: Request):
 
 # ── 스트리밍 ──────────────────────────────────────
 _SENTINEL = object()
+_thread_local = threading.local()
+
+
+def _ensure_mlx_streams():
+    """Worker 스레드에서 MLX 스트림을 1회만 초기화 (MLX 0.31.2+ thread-local 스트림 요구사항).
+
+    mx.async_eval()은 stream(gpu, 2)를 필요로 하지만, ThreadPoolExecutor 워커 스레드는
+    기본 스트림(0)만 자동 생성한다. new_stream() 2번 호출로 인덱스 1·2를 추가 생성.
+    같은 스레드 재사용 시 중복 생성 방지를 위해 thread-local 플래그로 1회만 실행.
+    """
+    if not getattr(_thread_local, 'mlx_ready', False):
+        mx.default_stream(mx.default_device())  # stream(gpu, 0)
+        mx.new_stream(mx.default_device())       # stream(gpu, 1)
+        mx.new_stream(mx.default_device())       # stream(gpu, 2) — async_eval 전용
+        _thread_local.mlx_ready = True
 
 
 def _stream_response(req_id, params, ip, start, last_msg):
