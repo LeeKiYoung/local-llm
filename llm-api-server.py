@@ -270,6 +270,13 @@ def make_chunk(req_id, model_name, delta, finish_reason=None):
 
 # ── 추론 ─────────────────────────────────────────
 def run_inference(params):
+    # MLX 0.31.2+: GPU 스트림이 thread-local — executor worker thread에서 스트림 초기화 필수
+    _stream = mx.default_stream(mx.default_device())
+    with mx.stream(_stream):
+        return _run_inference_inner(params)
+
+
+def _run_inference_inner(params):
     # _images가 사전 검증에서 이미 추출된 경우 재사용 (이중 fetch 방지, WR-02)
     images = params.get("_images") if "_images" in params else extract_images(params["messages"])
     messages = normalize_messages(params["messages"])
@@ -334,6 +341,13 @@ def run_inference(params):
 
 
 def run_inference_streaming(params):
+    # MLX 0.31.2+: thread-local GPU 스트림 초기화
+    _stream = mx.default_stream(mx.default_device())
+    with mx.stream(_stream):
+        yield from _run_inference_streaming_inner(params)
+
+
+def _run_inference_streaming_inner(params):
     # _images가 사전 검증에서 이미 추출된 경우 재사용 (이중 fetch 방지, WR-02)
     images = params.get("_images") if "_images" in params else extract_images(params["messages"])
     messages = normalize_messages(params["messages"])
