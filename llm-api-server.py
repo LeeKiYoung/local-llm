@@ -14,7 +14,6 @@ import argparse
 import asyncio
 import json
 import os
-import threading
 import time
 import uuid
 from datetime import datetime
@@ -34,6 +33,12 @@ from mlx_vlm.vision_cache import VisionFeatureCache
 
 # 압축 폭탄(decompression bomb) 방지 — 50MP 이상 이미지 거부 (PIL 기본값 약 178MP)
 Image.MAX_IMAGE_PIXELS = 50_000_000
+
+# MLX 0.31.2: async_eval은 thread-local stream(gpu,2)를 요구하는데
+# ThreadPoolExecutor worker 스레드에서 그 스트림을 만들 수 없음.
+# async_eval은 Python/GPU 오버랩 최적화일 뿐 — 순차 토큰 생성 서버에서
+# eval로 대체해도 성능 차이 없음.
+mx.async_eval = mx.eval
 
 # ── 글로벌 ────────────────────────────────────────
 app = FastAPI()
@@ -271,7 +276,6 @@ def make_chunk(req_id, model_name, delta, finish_reason=None):
 
 # ── 추론 ─────────────────────────────────────────
 def run_inference(params):
-    _ensure_mlx_streams()
     return _run_inference_inner(params)
 
 
@@ -340,7 +344,6 @@ def _run_inference_inner(params):
 
 
 def run_inference_streaming(params):
-    _ensure_mlx_streams()
     yield from _run_inference_streaming_inner(params)
 
 
@@ -474,22 +477,6 @@ async def chat_completions(request: Request):
 
 # ── 스트리밍 ──────────────────────────────────────
 _SENTINEL = object()
-_thread_local = threading.local()
-
-
-def _ensure_mlx_streams():
-    """Worker 스레드에서 MLX 스트림을 1회만 초기화 (MLX 0.31.2+ thread-local 스트림 요구사항).
-
-    mx.async_eval()은 stream(gpu, 2)를 필요로 하지만, ThreadPoolExecutor 워커 스레드는
-    기본 스트림(0)만 자동 생성한다. new_stream() 2번 호출로 인덱스 1·2를 추가 생성.
-    같은 스레드 재사용 시 중복 생성 방지를 위해 thread-local 플래그로 1회만 실행.
-    """
-    if not getattr(_thread_local, 'mlx_ready', False):
-        # 스트림 객체를 thread-local에 보관해야 GC로 소멸되지 않음
-        _thread_local.s0 = mx.default_stream(mx.default_device())  # stream(gpu, 0)
-        _thread_local.s1 = mx.new_stream(mx.default_device())       # stream(gpu, 1)
-        _thread_local.s2 = mx.new_stream(mx.default_device())       # stream(gpu, 2) — async_eval 전용
-        _thread_local.mlx_ready = True
 
 
 def _stream_response(req_id, params, ip, start, last_msg):
