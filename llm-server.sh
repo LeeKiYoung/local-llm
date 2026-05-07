@@ -2,7 +2,7 @@
 # Qwen3.6-27B / SuperGemma4 API 서버 실행 스크립트
 #
 # 사용법:
-#   ./llm-server.sh              # 기본 (Thinking OFF)
+#   ./llm-server.sh              # 기본 (Thinking OFF, MTP ON)
 #   ./llm-server.sh 1m           # 1M 컨텍스트
 #   ./llm-server.sh --think      # Thinking ON (수학/코딩 정확도 향상)
 #   ./llm-server.sh 1m --think   # 1M + Thinking ON
@@ -10,10 +10,14 @@
 #   ./llm-server.sh qwen36       # Qwen3.6-27B 명시적 선택
 #   ./llm-server.sh supergemma4    # SuperGemma4 모델
 #   ./llm-server.sh supergemma4 --think  # SuperGemma4 + Thinking (모델이 지원하는 경우만)
+#   ./llm-server.sh --no-mtp     # MTP speculative decoding 비활성화
 #
 # Thinking 제어:
 #   기본 Thinking OFF. --think 옵션으로 기본 ON.
 #   어느 쪽이든 요청별 enable_thinking 파라미터로 override 가능.
+#
+# MTP 제어:
+#   기본 MTP ON (mlx-vlm 소스 버전 필요). --no-mtp 옵션으로 비활성화.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$SCRIPT_DIR/.venv/bin"
@@ -23,6 +27,7 @@ HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
 MODEL_CONFIG=$(find "$HF_CACHE/models--mlx-community--Qwen3.6-27B-6bit/snapshots" -maxdepth 2 -name "config.json" 2>/dev/null | head -1)
 PORT=8080
 USE_THINK=false
+NO_MTP=false
 
 switch_profile() {
   if [ -z "$MODEL_CONFIG" ]; then
@@ -105,6 +110,9 @@ for arg in "$@"; do
     --think)
       USE_THINK=true
       ;;
+    --no-mtp)
+      NO_MTP=true
+      ;;
     *)
       if [[ "$arg" =~ ^[0-9]+$ ]]; then
         PORT="$arg"
@@ -117,6 +125,9 @@ done
 SERVER_ARGS+=(--model "$MODEL" --host 0.0.0.0 --port "$PORT")
 if [ "$USE_THINK" = true ]; then
   SERVER_ARGS+=(--think)
+fi
+if [ "$NO_MTP" = true ]; then
+  SERVER_ARGS+=(--no-draft)
 fi
 
 # 프로필 인자 없으면 상태 표시
@@ -140,6 +151,11 @@ if [ "$USE_THINK" = true ]; then
   echo "   🧠 Thinking: ON (기본, 요청별 override 가능)"
 else
   echo "   🧠 Thinking: OFF (기본, 요청별 override 가능)"
+fi
+if [ "$NO_MTP" = false ]; then
+  echo "   🚀 MTP: ON (speculative decoding, block_size=6)"
+else
+  echo "   🚀 MTP: OFF"
 fi
 echo "   📝 로깅: ON (logs/ 폴더에 저장)"
 echo "   종료: Ctrl+C"

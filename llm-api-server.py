@@ -47,6 +47,9 @@ DEFAULT_THINKING = False
 prompt_cache_state = None   # KV-캐시 재사용 (PromptCacheState, 턴 간 프리필 절감)
 vision_cache = None         # 비전 피처 캐시 (VisionFeatureCache, 동일 이미지 재인코딩 방지)
 PREFILL_STEP_SIZE = 512     # 청크 프리필 크기 (토큰) — 낮을수록 OOM 위험 감소
+DRAFT_KIND = "mtp"          # speculative decoding 드래프트 종류 (mtp 기본값, None이면 비활성화)
+DRAFT_BLOCK_SIZE = 6        # MTP round당 토큰 수 (draft_block_size)
+_MTP_SUPPORTED = False      # mlx-vlm 버전 MTP 지원 여부 (main() 시작 시 감지)
 
 # 대형 프리필 경고 임계값 (토큰 수 추정치 기준, 실제 토큰화 전 문자 수 / 3.5 근사)
 # 100K 토큰 이상이면 Metal OOM 위험을 콘솔에 경고한다
@@ -290,6 +293,11 @@ def run_inference(params):
     mx.synchronize()
 
     # mlx_vlm.generate()는 sampler 오브젝트 불필요 — temp/top_p 직접 전달 (per RESEARCH Pitfall 2)
+    draft_kwargs = {}
+    if DRAFT_KIND and _MTP_SUPPORTED:
+        draft_kwargs["draft_kind"] = DRAFT_KIND
+        draft_kwargs["draft_block_size"] = DRAFT_BLOCK_SIZE
+
     result = generate(
         model,
         processor,
@@ -301,6 +309,7 @@ def run_inference(params):
         prompt_cache_state=None if images else prompt_cache_state,
         vision_cache=vision_cache,
         prefill_step_size=PREFILL_STEP_SIZE,
+        **draft_kwargs,
     )
 
     full_text = result.text
@@ -343,6 +352,11 @@ def run_inference_streaming(params):
     # 추론 전 Metal 동기화 (clear_cache는 생략 — KV 캐시 보존 필요, Change 1 주석 참조)
     mx.synchronize()
 
+    draft_kwargs = {}
+    if DRAFT_KIND and _MTP_SUPPORTED:
+        draft_kwargs["draft_kind"] = DRAFT_KIND
+        draft_kwargs["draft_block_size"] = DRAFT_BLOCK_SIZE
+
     try:
         for response in stream_generate(
             model,
@@ -355,6 +369,7 @@ def run_inference_streaming(params):
             prompt_cache_state=None if images else prompt_cache_state,
             vision_cache=vision_cache,
             prefill_step_size=PREFILL_STEP_SIZE,
+            **draft_kwargs,
         ):
             yield response
     finally:
@@ -551,7 +566,7 @@ def _stream_response(req_id, params, ip, start, last_msg):
 # ── 메인 ─────────────────────────────────────────
 def main():
     global model, processor, model_id, gpu_semaphore, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING, \
-           prompt_cache_state, vision_cache
+           prompt_cache_state, vision_cache, DRAFT_KIND, DRAFT_BLOCK_SIZE, _MTP_SUPPORTED
 
     parser = argparse.ArgumentParser(description="Local LLM API Server")
     parser.add_argument("--model", type=str, default="mlx-community/Qwen3.6-27B-6bit")
@@ -560,14 +575,36 @@ def main():
     parser.add_argument("--max-queue", type=int, default=5)
     parser.add_argument("--think", action=argparse.BooleanOptionalAction, default=False,
                         help="Thinking ON/OFF (기본값: OFF, --think으로 활성화)")
+    parser.add_argument("--draft-kind", type=str, default="mtp", choices=["mtp", "dflash"],
+                        help="Speculative decoding 드래프트 종류 (기본값: mtp)")
+    parser.add_argument("--draft-block-size", type=int, default=6,
+                        help="MTP round당 토큰 수 (기본값: 6)")
+    parser.add_argument("--no-draft", action="store_true", default=False,
+                        help="Speculative decoding 비활성화")
     args = parser.parse_args()
 
     model_id = args.model
     MAX_QUEUE = args.max_queue
     DEFAULT_THINKING = args.think
+    DRAFT_KIND = None if args.no_draft else args.draft_kind
+    DRAFT_BLOCK_SIZE = args.draft_block_size
     gpu_semaphore = asyncio.Semaphore(1)
     LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
     os.makedirs(LOG_DIR, exist_ok=True)
+
+    # mlx-vlm 버전에서 MTP 지원 여부 감지 (PR #1115 이상 필요)
+    try:
+        import inspect
+        from mlx_vlm.generate import generate_step
+        _MTP_SUPPORTED = "draft_kind" in inspect.signature(generate_step).parameters
+    except Exception:
+        _MTP_SUPPORTED = False
+
+    if DRAFT_KIND and not _MTP_SUPPORTED:
+        print("⚠️  현재 mlx-vlm이 MTP를 지원하지 않습니다. 소스 설치 필요:")
+        print("   pip install git+https://github.com/Blaizzy/mlx-vlm.git")
+        print("   MTP 비활성화 상태로 계속합니다.")
+        DRAFT_KIND = None
 
     print(f"📥 모델 로딩: {model_id}")
     model, processor = load(model_id)
@@ -582,6 +619,10 @@ def main():
         print(f"   🧠 Thinking: ON (기본, 요청별 override 가능)")
     else:
         print(f"   🧠 Thinking: OFF (기본, 요청별 override 가능)")
+    if DRAFT_KIND:
+        print(f"   🚀 MTP: ON ({DRAFT_KIND}, block_size={DRAFT_BLOCK_SIZE})")
+    else:
+        print(f"   🚀 MTP: OFF")
     print(f"   📝 로깅: {LOG_DIR}/")
     print(f"   종료: Ctrl+C")
     print()
