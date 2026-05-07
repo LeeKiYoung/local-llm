@@ -122,11 +122,11 @@ else
   echo "✅ 가상환경 생성 완료"
 fi
 
-# 6. mlx-vlm 설치 (소스 버전 — MTP speculative decoding 지원, PR #1115)
+# 6. mlx-vlm 설치 (PyPI 고정 버전 — 0.5.0부터 MTP speculative decoding 지원)
 echo ""
-echo "📦 mlx-vlm 소스 설치 중 (MTP 지원 버전)..."
+echo "📦 mlx-vlm 설치 중 (0.5.0)..."
 "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
-"$SCRIPT_DIR/.venv/bin/pip" install "git+https://github.com/Blaizzy/mlx-vlm.git" -q
+"$SCRIPT_DIR/.venv/bin/pip" install "mlx-vlm==0.5.0" -q
 echo "✅ mlx-vlm 설치 완료"
 
 echo "📦 FastAPI + uvicorn 설치 중..."
