@@ -212,14 +212,18 @@ def get_prompt_preview(messages):
     return ""
 
 
-def strip_thinking(text):
+def strip_thinking(text, enable_thinking=False):
     """<think>...</think> 블록 제거 — preserve_thinking=False일 때만 호출 (CORE-06)"""
     import re
     # Qwen3.6-27B: chat template이 <think>를 프롬프트 prefix로 주입하므로
     # 생성 텍스트에는 </think> 끝 태그만 나옴 — split으로 이후 텍스트 추출.
-    # </think>가 없으면(max_tokens 초과로 잘린 경우) 기존 정규식 폴백.
     if "</think>" in text:
         return text.split("</think>", 1)[1].strip()
+    if enable_thinking:
+        # enable_thinking=True인데 </think> 없음 → max_tokens 초과로 잘린 것
+        # thinking 내용 노출 방지 (finish_reason=length로 클라이언트가 인지, issue #14)
+        return ""
+    # enable_thinking=False: thinking 블록이 없는 정상 응답 → 원문 반환
     return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
 
 
@@ -332,7 +336,7 @@ def _run_inference_inner(params):
 
     # preserve_thinking=False일 때만 <think> 블록 제거 (per D-19)
     if not params.get("preserve_thinking"):
-        full_text = strip_thinking(full_text)
+        full_text = strip_thinking(full_text, enable_thinking=params.get("enable_thinking", False))
 
     if images:
         prompt_cache_state.cache = None
@@ -564,12 +568,13 @@ def _stream_response(req_id, params, ip, start, last_msg):
                             if after:
                                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': after}))}\n\n"
 
-                # </think>가 끝내 안 나온 경우 (thinking 없는 응답이거나 max_tokens 초과로 잘림)
-                # 버퍼 전체를 한 번에 yield해 regression 방지
-                if not thinking_done and think_buf:
+                # </think>가 끝내 안 나온 경우:
+                # - enable_thinking=False: thinking 없는 정상 응답 → 버퍼 전체 yield
+                # - enable_thinking=True: max_tokens 초과로 잘린 것 → thinking 내용 노출 방지 (issue #14)
+                if not thinking_done and think_buf and not params.get("enable_thinking"):
                     yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': think_buf}))}\n\n"
 
-                full_text = strip_thinking(full_text)
+                full_text = strip_thinking(full_text, enable_thinking=params.get("enable_thinking", False))
 
                 # 최종 청크
                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {}, finish_reason))}\n\n"

@@ -388,6 +388,18 @@ class TestStripThinking:
         result = _REAL_STRIP_THINKING(input_text)
         assert result == "일반 텍스트 응답"
 
+    def test_strip_thinking_truncated_without_close_tag(self):
+        """issue #14: enable_thinking=True인데 </think> 없이 잘린 경우 빈 문자열 반환 (thinking 내용 노출 방지)"""
+        truncated = "추론 과정이 잘린 텍스트"
+        result = _REAL_STRIP_THINKING(truncated, enable_thinking=True)
+        assert result == ""
+
+    def test_strip_thinking_truncated_enable_thinking_false(self):
+        """issue #14: enable_thinking=False이면 </think> 없어도 원문 그대로 반환"""
+        normal_response = "thinking 없는 정상 응답"
+        result = _REAL_STRIP_THINKING(normal_response, enable_thinking=False)
+        assert result == "thinking 없는 정상 응답"
+
 
 # ── preserve_thinking / DEFAULT_THINKING 통합 테스트 ─────────────────────────
 class TestPreserveThinking:
