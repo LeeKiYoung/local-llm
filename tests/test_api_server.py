@@ -111,6 +111,13 @@ def client():
     return TestClient(server_module.app)
 
 
+# ── 앱 라이프사이클 ───────────────────────────────
+class TestAppLifecycle:
+    def test_app_uses_lifespan_instead_of_startup_event(self):
+        assert server_module.app.router.lifespan_context is server_module.lifespan
+        assert server_module.app.router.on_startup == []
+
+
 # ── GET /v1/models ───────────────────────────────
 class TestModels:
     def test_list_models(self, client):
