@@ -35,7 +35,7 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - **transformers** 5.0.0+ - Model loading and tokenization (mlx-vlm dependency)
 - **sentencepiece** - Tokenization library (mlx-vlm dependency)
 ## Key Dependencies
-- mlx-vlm 0.4.4 - Provides load(), generate(), and stream_generate() functions for VLM inference (multimodal)
+- mlx-vlm 0.6.3 - Provides load(), generate(), stream_generate(), Qwen MTP, and VLM inference support
 - mlx 0.31.1 - Core computation engine, mx.clear_cache() for KV cache management
 - fastapi 0.135.2 - HTTP API framework for /v1/chat/completions and /v1/models endpoints
 - transformers 5.0.0+ - Tokenizer.apply_chat_template() for prompt formatting with enable_thinking support
