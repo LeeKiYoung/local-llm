@@ -32,7 +32,7 @@ from mlx_vlm import load, generate, stream_generate
 from mlx_vlm.prompt_utils import apply_chat_template
 from mlx_vlm.generate import PromptCacheState
 from mlx_vlm.vision_cache import VisionFeatureCache
-from mlx_vlm.apc import APCManager, DiskBlockStore
+from mlx_vlm.apc import APCManager, DiskBlockStore, apc_disk_namespace
 
 # 압축 폭탄(decompression bomb) 방지 — 50MP 이상 이미지 거부 (PIL 기본값 약 178MP)
 Image.MAX_IMAGE_PIXELS = 50_000_000
@@ -56,6 +56,7 @@ vision_cache = None         # 비전 피처 캐시 (VisionFeatureCache, 동일 �
 apc_manager = None          # APC 블록 캐시 (APCManager, 요청 간 공통 프리픽스 프리필 재사용)
 APC_ENABLED = True          # APC 사용 여부 (--no-apc로 비활성화)
 APC_DIR = ""                # APC 디스크 영속 경로 (빈 문자열이면 메모리 전용)
+APC_MAX_GB = 20.0           # APC 디스크 캐시 상한 (GB, 0이면 무제한)
 PREFILL_STEP_SIZE = 512     # 청크 프리필 크기 (토큰) — 낮을수록 OOM 위험 감소
 DRAFT_KIND = "mtp"          # speculative decoding 드래프트 종류 (mtp 기본값, None이면 비활성화)
 DRAFT_BLOCK_SIZE = 6        # MTP round당 토큰 수 (draft_block_size)
@@ -71,13 +72,21 @@ def _make_apc_manager():
 
     APC(automatic prefix caching)는 요청 간 공통 프리픽스(시스템 프롬프트 등)의 KV 블록을
     재사용해 프리필을 건너뛴다. mlx-vlm 0.6.5+ 필요.
+
+    namespace는 반드시 model_id로 파생한다 — 하나의 캐시 디렉터리를 여러 모델
+    프로필(qwen36 / qwen36-fast 등)이 공유하면 다른 모델의 KV 블록이 그대로 재사용되어
+    조용히 잘못된 출력이 나온다. mlx-vlm 자체 서버(server/app.py)도 동일하게 처리한다.
     """
     if not APC_ENABLED:
         return None
     disk = None
     if APC_DIR:
         from pathlib import Path
-        disk = DiskBlockStore(Path(APC_DIR))
+        disk = DiskBlockStore(
+            Path(APC_DIR).expanduser(),
+            namespace=apc_disk_namespace(model_id),
+            max_bytes=int(APC_MAX_GB * (1 << 30)) if APC_MAX_GB > 0 else None,
+        )
     return APCManager(disk=disk)
 
 
@@ -635,7 +644,7 @@ def _stream_response(req_id, params, ip, start, last_msg):
 # ── 메인 ─────────────────────────────────────────
 def main():
     global model_id, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING, DRAFT_KIND, DRAFT_BLOCK_SIZE, _MTP_SUPPORTED
-    global APC_ENABLED, APC_DIR
+    global APC_ENABLED, APC_DIR, APC_MAX_GB
 
     parser = argparse.ArgumentParser(description="Local LLM API Server")
     parser.add_argument("--model", type=str, default="mlx-community/Qwen3.6-27B-6bit")
@@ -654,6 +663,8 @@ def main():
                         help="APC(prefix caching) 비활성화")
     parser.add_argument("--apc-dir", type=str, default="",
                         help="APC 블록 디스크 영속 경로 (미지정 시 메모리 전용)")
+    parser.add_argument("--apc-max-gb", type=float, default=20.0,
+                        help="APC 디스크 캐시 상한 GB (기본값: 20, 0이면 무제한)")
     args = parser.parse_args()
 
     model_id = args.model
@@ -663,6 +674,7 @@ def main():
     DRAFT_BLOCK_SIZE = args.draft_block_size
     APC_ENABLED = not args.no_apc
     APC_DIR = args.apc_dir
+    APC_MAX_GB = args.apc_max_gb
     LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
     os.makedirs(LOG_DIR, exist_ok=True)
     if APC_ENABLED and APC_DIR:
@@ -695,7 +707,8 @@ def main():
     else:
         print(f"   🚀 MTP: OFF")
     if APC_ENABLED:
-        print(f"   ♻️  APC: ON ({'disk: ' + APC_DIR if APC_DIR else '메모리 전용'})")
+        cap = f", 상한 {APC_MAX_GB:g}GB" if APC_MAX_GB > 0 else ", 무제한"
+        print(f"   ♻️  APC: ON ({'disk: ' + APC_DIR + cap if APC_DIR else '메모리 전용'})")
     else:
         print(f"   ♻️  APC: OFF")
     print(f"   📝 로깅: {LOG_DIR}/")

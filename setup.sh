@@ -126,7 +126,9 @@ fi
 echo ""
 echo "📦 mlx-vlm 설치 중 (0.6.8)..."
 "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
-"$SCRIPT_DIR/.venv/bin/pip" install "mlx-vlm==0.6.8" "mlx==0.32.0" -q
+# transformers도 고정 — 채팅 템플릿(enable_thinking, <think> prefix 주입) 동작이
+# strip_thinking() 로직과 결합돼 있어 버전이 흔들리면 조용히 깨진다
+"$SCRIPT_DIR/.venv/bin/pip" install "mlx-vlm==0.6.8" "mlx==0.32.0" "transformers==5.14.1" -q
 echo "✅ mlx-vlm 설치 완료"
 
 echo "📦 FastAPI + uvicorn 설치 중..."

@@ -96,6 +96,7 @@ def setup():
     server_module.apc_manager = MagicMock()
     server_module.APC_ENABLED = True
     server_module.APC_DIR = ""
+    server_module.APC_MAX_GB = 20.0
     server_module.PREFILL_STEP_SIZE = 512
     server_module.LOG_DIR = "/tmp/llm-test-logs"
     os.makedirs("/tmp/llm-test-logs", exist_ok=True)
@@ -710,6 +711,7 @@ class TestMakeAPCManager:
         # 이전 테스트의 호출 기록이 남지 않도록 초기화한다
         server_module.APCManager.reset_mock()
         server_module.DiskBlockStore.reset_mock()
+        server_module.apc_disk_namespace.reset_mock()
         yield
 
     def test_returns_none_when_disabled(self):
@@ -729,3 +731,36 @@ class TestMakeAPCManager:
         server_module._make_apc_manager()
         assert server_module.APCManager.call_args.kwargs["disk"] is not None
         assert server_module.DiskBlockStore.called
+
+    def test_disk_namespace_is_model_scoped(self):
+        """디스크 캐시 namespace는 model_id로 파생되어야 한다.
+
+        namespace를 고정하면 qwen36 / qwen36-fast가 같은 .apc-cache/를 공유하면서
+        다른 모델의 KV 블록을 재사용해 조용히 잘못된 출력을 낸다.
+        """
+        server_module.APC_ENABLED = True
+        server_module.APC_DIR = "/tmp/llm-test-apc"
+        server_module.model_id = "mlx-community/Qwen3.6-35B-A3B-8bit"
+        server_module._make_apc_manager()
+
+        server_module.apc_disk_namespace.assert_called_once_with(
+            "mlx-community/Qwen3.6-35B-A3B-8bit"
+        )
+        ns = server_module.DiskBlockStore.call_args.kwargs["namespace"]
+        assert ns is server_module.apc_disk_namespace.return_value
+
+    def test_disk_cache_has_size_cap(self):
+        """APC_MAX_GB > 0이면 max_bytes 상한이 전달된다"""
+        server_module.APC_ENABLED = True
+        server_module.APC_DIR = "/tmp/llm-test-apc"
+        server_module.APC_MAX_GB = 20.0
+        server_module._make_apc_manager()
+        assert server_module.DiskBlockStore.call_args.kwargs["max_bytes"] == 20 * (1 << 30)
+
+    def test_disk_cache_unbounded_when_zero(self):
+        """APC_MAX_GB=0이면 무제한(max_bytes=None)"""
+        server_module.APC_ENABLED = True
+        server_module.APC_DIR = "/tmp/llm-test-apc"
+        server_module.APC_MAX_GB = 0
+        server_module._make_apc_manager()
+        assert server_module.DiskBlockStore.call_args.kwargs["max_bytes"] is None

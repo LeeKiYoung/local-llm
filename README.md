@@ -459,21 +459,29 @@ APC는 요청 간 **공통 프리픽스의 KV 블록을 재사용**해 프리필
 
 - **출력 품질 영향 없음** — 이미 계산된 KV를 재사용할 뿐, 샘플링에는 관여하지 않음
 - **디스크 영속** — 블록을 `.apc-cache/`에 저장해 서버 재시작 후에도 워밍 상태 유지
+- **모델별 격리** — 캐시 namespace를 model_id로 파생하므로 `qwen36` / `qwen36-fast`가
+  같은 디렉터리를 써도 서로의 KV 블록을 재사용하지 않음
 - 기존 `PromptCacheState`(직전 턴 KV 재사용) / `VisionFeatureCache`(이미지 재인코딩 방지)와 **병행 동작**
+
+> 본 프로젝트에서 TTFT 개선폭은 아직 실측하지 않았습니다. 위 설명은 mlx-vlm의 설계 동작 기준입니다.
 
 ### 기본값: ON
 
 ```
-♻️  APC: ON (prefix caching, disk: /path/to/local-llm/.apc-cache)
+♻️  APC: ON (prefix caching, disk: /path/to/local-llm/.apc-cache, 상한 20GB)
 ```
 
 ### 비활성화 / 경로 변경
 
 ```bash
-./llm-server.sh --no-apc                            # 끄기
-python llm-api-server.py --apc-dir /path/to/cache   # 경로 지정
-python llm-api-server.py --apc-dir ""               # 메모리 전용 (디스크 미사용)
+./llm-server.sh --no-apc                             # 끄기
+python llm-api-server.py --apc-dir /path/to/cache    # 경로 지정
+python llm-api-server.py --apc-dir ""                # 메모리 전용 (디스크 미사용)
+python llm-api-server.py --apc-max-gb 50             # 디스크 상한 변경 (0이면 무제한)
 ```
+
+`llm-server.sh`는 항상 `.apc-cache/`를 디스크 경로로 넘깁니다. 메모리 전용으로 쓰려면
+`llm-api-server.py`를 직접 실행하세요.
 
 ### 알려진 제약
 
