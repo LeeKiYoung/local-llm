@@ -397,6 +397,10 @@ curl -s localhost:8080/api/stats | jq
 curl -s "localhost:8080/api/stats?days=30" | jq '.duration_ms'
 ```
 
+> `days`는 **롤링 24시간이 아니라 날짜 파일 단위**입니다. `days=1`은 오늘 자
+> `logs/YYYY-MM-DD.jsonl` 하나만 읽으므로, 자정 직후에는 어제 밤 요청이 잡히지 않습니다.
+> 그 구간까지 보려면 `days=2` 이상을 쓰세요.
+
 ---
 
 ## 컨텍스트 프로필 시스템
