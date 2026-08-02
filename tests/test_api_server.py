@@ -857,3 +857,77 @@ class TestSamplingParams:
                     "presence_penalty", "frequency_penalty"}
         assert sampling <= non_stream
         assert sampling <= set(captured)
+
+
+# ── seed 자동 생성 (워커 스레드 RNG 미진행 회피) ─────────────────────────────
+class TestAutoSeed:
+    """MLX 전역 RNG는 _gpu_executor 워커 스레드에서 진행되지 않는다.
+
+    그 결과 seed 없이 temperature > 0으로 요청하면 매번 동일한 출력이 나온다.
+    서버가 요청마다 seed를 생성해 seed 기반 sampler 경로를 태워야 한다.
+    """
+
+    def _seed(self):
+        return server_module.generate.call_args.kwargs["seed"]
+
+    def test_auto_seed_when_omitted(self, client):
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+            "temperature": 1.0,
+        })
+        assert resp.status_code == 200
+        seed = self._seed()
+        assert isinstance(seed, int)
+        assert 0 <= seed < 2 ** 31
+
+    def test_auto_seed_varies_between_requests(self, client):
+        seeds = set()
+        for _ in range(5):
+            client.post("/v1/chat/completions", json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "test"}],
+                "temperature": 1.0,
+            })
+            seeds.add(self._seed())
+        # 요청마다 달라야 출력이 갈린다 (5회 모두 같을 확률은 사실상 0)
+        assert len(seeds) > 1
+
+    def test_explicit_seed_is_preserved(self, client):
+        """클라이언트가 seed를 주면 그대로 써서 재현성을 보장한다"""
+        for _ in range(2):
+            client.post("/v1/chat/completions", json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "test"}],
+                "temperature": 1.0,
+                "seed": 999,
+            })
+            assert self._seed() == 999
+
+    def test_no_auto_seed_for_greedy(self, client):
+        """temperature=0은 greedy라 seed가 무의미 — None 유지"""
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+            "temperature": 0.0,
+        })
+        assert resp.status_code == 200
+        assert self._seed() is None
+
+    def test_streaming_also_gets_auto_seed(self, client):
+        captured = {}
+
+        def capturing_stream(model, processor, prompt, image=None, **kwargs):
+            captured.update(kwargs)
+            yield MockResponse("hi", generation_tokens=1, finish_reason="stop")
+
+        server_module.stream_generate = capturing_stream
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+            "temperature": 1.0,
+            "stream": True,
+        })
+        assert resp.status_code == 200
+        list(resp.iter_lines())
+        assert isinstance(captured["seed"], int)

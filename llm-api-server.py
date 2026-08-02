@@ -15,6 +15,7 @@ import asyncio
 import concurrent.futures
 import json
 import os
+import random
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -344,10 +345,19 @@ def _sampling_kwargs(params):
     OpenAI의 stop은 아직 전달하지 않는다: mlx-vlm의 eos_tokens 처리가 generate()에만
     있고 stream_generate()에는 없어 스트리밍/비스트리밍 동작이 갈린다.
     """
+    seed = params["seed"]
+    if seed is None and params["temperature"] > 0:
+        # MLX 전역 RNG(mx.random.state)는 메인 스레드의 Stream에 묶여 있어
+        # _gpu_executor 워커 스레드에서는 진행되지 않는다. 그래서 seed 없이 샘플링하면
+        # 매 요청 동일한 난수를 뽑아 temperature > 0인데도 출력이 항상 같아진다.
+        # 요청마다 seed를 만들어 넘기면 mlx-vlm이 seed+위치 기반 sampler를 쓰므로
+        # 전역 RNG에 의존하지 않고 요청 간 변화가 생긴다.
+        # (클라이언트가 seed를 지정하면 그대로 사용 → 재현성 유지)
+        seed = random.randrange(2**31)
     return {
         "temperature": params["temperature"],
         "top_p": params["top_p"],
-        "seed": params["seed"],
+        "seed": seed,
         "repetition_penalty": params["repetition_penalty"],
         "presence_penalty": params["presence_penalty"] or None,
         "frequency_penalty": params["frequency_penalty"] or None,

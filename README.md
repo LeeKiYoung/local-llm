@@ -132,7 +132,7 @@ local-llm/
 │   ├── config-qwen36-27b-262k.json       # 기본 프로필 (262K, Qwen3.6-27B)
 │   └── config-qwen36-27b-1m.json         # 확장 프로필 (1M YaRN, Qwen3.6-27B)
 ├── tests/
-│   ├── test_api_server.py                # API 서버 테스트 (60개)
+│   ├── test_api_server.py                # API 서버 테스트 (65개)
 │   └── test_proxy.py                     # 프록시 테스트
 ├── local-llm-guide-2026.md               # 모델 비교 가이드 문서
 ├── .venv/                                # Python 가상환경
@@ -565,8 +565,6 @@ Qwen3.6-27B는 Thinking 기본 OFF (DEFAULT_THINKING=False). 요청 시 enable_t
 >
 > 실측 확인 (Qwen3.6-27B): `0.0` → `"Purple elephants dance on moonlight."`,
 > `2.0` → 출력 붕괴(토큰 반복). temperature가 샘플러까지 도달함을 확인했습니다.
-> 다만 **동일 요청을 반복하면 매번 같은 출력**이 나옵니다(run-to-run 랜덤성 없음).
-> 이는 별개 사안이며, 변화가 필요하면 요청에 `seed`를 다르게 지정하세요.
 
 ### 지원하는 샘플링 파라미터
 
@@ -574,11 +572,44 @@ Qwen3.6-27B는 Thinking 기본 OFF (DEFAULT_THINKING=False). 요청 시 enable_t
 |---|:-:|---|
 | `temperature` | ✅ | 기본 1.0 |
 | `top_p` | ✅ | 기본 1.0 |
-| `seed` | ✅ | 미지정 시 None |
+| `seed` | ✅ | **미지정 시 서버가 요청마다 자동 생성** (아래 참조) |
 | `repetition_penalty` | ✅ | 미지정 시 None |
 | `presence_penalty` | ✅ | 0이면 None으로 변환 |
 | `frequency_penalty` | ✅ | 0이면 None으로 변환 |
 | `stop` | ❌ | 파싱은 되나 미전달 — mlx-vlm의 `eos_tokens` 처리가 `generate()`에만 있고 `stream_generate()`에는 없어 스트리밍/비스트리밍 동작이 갈림 |
+
+### seed 자동 생성 — 워커 스레드 RNG 이슈 우회
+
+**증상.** `temperature > 0`으로 같은 요청을 반복해도 **매번 완전히 동일한 응답**이 나왔습니다.
+temperature 값을 바꾸면 출력은 달라지므로 샘플링 자체는 동작하는데, run-to-run 변화만
+없는 상태였습니다.
+
+**원인.** 이 서버는 MLX 스트림이 thread-local이라 모델 로드와 모든 추론을 전용 워커
+스레드(`_gpu_executor`)에서 실행합니다. 그런데 MLX의 전역 RNG(`mx.random.state`) 배열은
+메인 스레드의 스트림에 묶여 있어 워커 스레드에서 접근하면 다음과 같이 실패합니다:
+
+```
+RuntimeError: There is no Stream(gpu, 0) in current thread.
+```
+
+결과적으로 전역 RNG 상태가 **진행되지 않아** 매 요청 같은 난수를 뽑습니다.
+
+**수정.** 클라이언트가 `seed`를 지정하지 않고 `temperature > 0`이면 서버가 요청마다
+seed를 생성해 전달합니다. mlx-vlm은 seed가 있으면 전역 RNG 대신 **seed + 토큰 위치**로
+키를 만드는 sampler를 쓰므로 워커 스레드 문제를 우회합니다.
+
+- `seed` 미지정 → 요청마다 다른 응답 (OpenAI 기본 동작과 동일)
+- `seed` 지정 → 완전히 재현 가능
+
+**실측 (Qwen3.6-27B, `temp=1.0 top_p=1.0`, 동일 프롬프트 6회)**
+
+| | 고유 응답 수 |
+|---|---|
+| 수정 전 | **1 / 6** |
+| 수정 후 | **6 / 6** |
+| `seed=42` 고정 3회 | 1 / 3 (재현성 유지) |
+
+> MTP ON/OFF와는 무관합니다 (양쪽에서 동일하게 재현 후 수정 확인).
 
 ### Max Tokens
 
