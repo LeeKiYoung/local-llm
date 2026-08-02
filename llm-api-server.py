@@ -527,7 +527,9 @@ function drawBarChart(canvas, labels, series, colors) {
   labels.forEach((label, gi) => {
     const x = padding + gi * groupWidth + groupWidth / 2;
     ctx.textAlign = "center";
-    ctx.fillText(label.slice(5), x, cssHeight - 6);
+    // 날짜 라벨(YYYY-MM-DD)만 연도를 떼고, 그 외(p50 등)는 그대로 그린다.
+    const text = /^\d{4}-\d{2}-\d{2}$/.test(label) ? label.slice(5) : label;
+    ctx.fillText(text, x, cssHeight - 6);
   });
 }
 
