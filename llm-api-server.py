@@ -372,6 +372,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   }
   h1 { font-size: 20px; margin: 0 0 16px; }
   .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 20px; }
+  .last-updated { color: #6b7280; font-size: 12px; margin-left: 4px; }
   select, button {
     background: #1b1f2a;
     color: #e6e6e6;
@@ -420,6 +421,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <option value="30">30일</option>
     </select>
     <button id="refresh">새로고침</button>
+    <select id="autoRefresh">
+      <option value="0">자동 갱신 끄기</option>
+      <option value="5">5초마다</option>
+      <option value="10" selected>10초마다</option>
+      <option value="30">30초마다</option>
+    </select>
+    <span id="lastUpdated" class="last-updated"></span>
   </div>
 
   <div class="cards" id="cards"></div>
@@ -662,12 +670,37 @@ async function loadStats() {
   renderCharts(data);
   renderRatios(data);
   renderRecent(data);
+  document.getElementById("lastUpdated").textContent =
+    "갱신 " + new Date().toLocaleTimeString();
+}
+
+// 자동 갱신: setInterval 하나만 유지하고 주기가 바뀌면 갈아끼운다.
+// 탭이 숨겨져 있으면 폴링을 건너뛴다 — 백그라운드에서 로그 파일을 계속 긁을 이유가 없다.
+let autoTimer = null;
+
+function applyAutoRefresh() {
+  if (autoTimer !== null) {
+    clearInterval(autoTimer);
+    autoTimer = null;
+  }
+  const sec = parseInt(document.getElementById("autoRefresh").value, 10);
+  if (!sec) return;
+  autoTimer = setInterval(() => {
+    if (document.hidden) return;
+    loadStats();
+  }, sec * 1000);
 }
 
 document.getElementById("refresh").addEventListener("click", loadStats);
 document.getElementById("period").addEventListener("change", loadStats);
+document.getElementById("autoRefresh").addEventListener("change", applyAutoRefresh);
 window.addEventListener("resize", loadStats);
+// 탭으로 돌아오면 숨은 동안 밀린 내용을 즉시 한 번 채운다.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && autoTimer !== null) loadStats();
+});
 loadStats();
+applyAutoRefresh();
 </script>
 </body>
 </html>
