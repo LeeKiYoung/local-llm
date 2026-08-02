@@ -19,7 +19,7 @@ import random
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
 
 import mlx.core as mx
@@ -52,6 +52,9 @@ pending = 0
 MAX_QUEUE = 5
 LOG_DIR = ""
 DEFAULT_THINKING = False
+MAX_STATS_DAYS = 30         # /api/stats days 파라미터 상한 (DoS 방지)
+DEFAULT_STATS_DAYS = 7      # /api/stats days 파라미터 기본값
+RECENT_REQUESTS_LIMIT = 50  # /api/stats recent 목록 최대 개수
 prompt_cache_state = None   # KV-캐시 재사용 (PromptCacheState, 턴 간 프리필 절감)
 vision_cache = None         # 비전 피처 캐시 (VisionFeatureCache, 동일 이미지 재인코딩 방지)
 apc_manager = None          # APC 블록 캐시 (APCManager, 요청 간 공통 프리픽스 프리필 재사용)
@@ -157,6 +160,199 @@ def log_entry(entry):
     thinking = "🧠ON" if entry.get("enable_thinking") else "🧠OFF"
     stream = " 📡" if entry.get("stream") else ""
     print(f"  [{entry['timestamp']}] {ip} | {thinking}{stream} | {tokens} tokens | {duration}ms | {prompt}...")
+
+
+# ── 통계 집계 (모니터링 대시보드) ───────────────────
+def _percentile(sorted_values, pct):
+    """정렬된 리스트에서 sort-and-index 방식으로 백분위수를 구한다.
+
+    statistics.quantiles는 n < 2에서 예외를 던지므로 빈 로그 상황(empty-log case)에
+    0을 반환해야 하는 이 함수의 요구사항과 맞지 않아 사용하지 않는다.
+    """
+    if not sorted_values:
+        return 0
+    idx = min(int(pct / 100 * len(sorted_values)), len(sorted_values) - 1)
+    return sorted_values[idx]
+
+
+def aggregate_stats(log_dir, days=DEFAULT_STATS_DAYS) -> dict:
+    """logs/YYYY-MM-DD.jsonl 파일들을 집계해 대시보드용 통계 dict를 만든다.
+
+    log_dir을 인자로 받는다 — LOG_DIR은 main() 실행 전까지 ""이므로 전역을 직접
+    읽으면 테스트가 불가능하고 import 시점에 상대 경로로 고정되어 버린다.
+
+    파일 필터링은 read-then-filter가 아니라 파일명 기준 구조적 필터링이다: 날짜
+    범위 밖의 파일은 아예 열지 않는다 (T-vr8-03 DoS 방지).
+    """
+    # days 클램핑: 비정수/1 미만/MAX_STATS_DAYS 초과 모두 안전한 값으로 수렴시킨다.
+    # HTTP 레이어는 `days: int`를 유지하므로 ?days=abc는 FastAPI가 422로 거부한다 —
+    # 이건 여기서 처리할 대상이 아닌 정상적인 검증 동작이다.
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        days = DEFAULT_STATS_DAYS
+    days = max(1, min(days, MAX_STATS_DAYS))
+
+    today = datetime.now().date()
+    cutoff = today - timedelta(days=days - 1)
+
+    schema = {
+        "days": days,
+        "generated_at": datetime.now().isoformat(),
+        "total_requests": 0,
+        "daily": [],
+        "tokens": {"prompt": 0, "completion": 0, "total": 0},
+        "duration_ms": {"avg": 0, "p50": 0, "p90": 0, "p99": 0, "max": 0},
+        "tokens_per_sec": {"avg": 0, "p50": 0, "max": 0},
+        "thinking": {"on": 0, "off": 0},
+        "streaming": {"on": 0, "off": 0},
+        "finish_reason": {},
+        "recent": [],
+    }
+
+    if not os.path.isdir(log_dir):
+        return schema
+
+    # 파일명(날짜)만으로 윈도 밖 파일을 걸러낸다 — 내용을 읽지 않는다.
+    candidates = []
+    for fname in os.listdir(log_dir):
+        if not fname.endswith(".jsonl"):
+            continue
+        date_str = fname[: -len(".jsonl")]
+        try:
+            file_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if file_date < cutoff:
+            continue
+        candidates.append((file_date, fname))
+    candidates.sort(key=lambda t: t[0])
+
+    total_requests = 0
+    prompt_total = 0
+    completion_total = 0
+    durations = []
+    tokens_per_sec_list = []
+    thinking_on = 0
+    thinking_off = 0
+    stream_on = 0
+    stream_off = 0
+    finish_reason_counts = {}
+    daily = []
+    recent = []
+
+    for file_date, fname in candidates:
+        path = os.path.join(log_dir, fname)
+        day_requests = 0
+        day_prompt_tokens = 0
+        day_completion_tokens = 0
+        day_durations = []
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except OSError:
+            continue
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if not isinstance(entry, dict):
+                continue
+
+            usage = entry.get("usage") or {}
+            prompt_tokens = usage.get("prompt_tokens", 0) or 0
+            completion_tokens = usage.get("completion_tokens", 0) or 0
+            total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens) or 0
+            duration_ms = entry.get("duration_ms", 0) or 0
+
+            total_requests += 1
+            day_requests += 1
+            prompt_total += prompt_tokens
+            completion_total += completion_tokens
+            day_prompt_tokens += prompt_tokens
+            day_completion_tokens += completion_tokens
+            durations.append(duration_ms)
+            day_durations.append(duration_ms)
+
+            tps = (completion_tokens / (duration_ms / 1000)) if duration_ms > 0 else 0.0
+            tokens_per_sec_list.append(tps)
+
+            if entry.get("enable_thinking"):
+                thinking_on += 1
+            else:
+                thinking_off += 1
+
+            if entry.get("stream"):
+                stream_on += 1
+            else:
+                stream_off += 1
+
+            finish_reason = entry.get("finish_reason", "unknown")
+            finish_reason_counts[finish_reason] = finish_reason_counts.get(finish_reason, 0) + 1
+
+            recent.append({
+                "timestamp": entry.get("timestamp", ""),
+                "ip": entry.get("ip", "?"),
+                "enable_thinking": bool(entry.get("enable_thinking")),
+                "stream": bool(entry.get("stream")),
+                "duration_ms": duration_ms,
+                "total_tokens": total_tokens,
+                "finish_reason": finish_reason,
+                "prompt_preview": entry.get("prompt_preview", ""),
+                "content_preview": entry.get("content_preview", ""),
+            })
+
+        daily.append({
+            "date": file_date.strftime("%Y-%m-%d"),
+            "requests": day_requests,
+            "prompt_tokens": day_prompt_tokens,
+            "completion_tokens": day_completion_tokens,
+            "avg_duration_ms": (sum(day_durations) / len(day_durations)) if day_durations else 0,
+        })
+
+    def _timestamp_key(item):
+        try:
+            return datetime.fromisoformat(item["timestamp"])
+        except (ValueError, TypeError):
+            return datetime.min
+
+    recent.sort(key=_timestamp_key, reverse=True)
+    recent = recent[:RECENT_REQUESTS_LIMIT]
+
+    sorted_durations = sorted(durations)
+    sorted_tps = sorted(tokens_per_sec_list)
+
+    schema["total_requests"] = total_requests
+    schema["daily"] = daily
+    schema["tokens"] = {
+        "prompt": prompt_total,
+        "completion": completion_total,
+        "total": prompt_total + completion_total,
+    }
+    schema["duration_ms"] = {
+        "avg": (sum(durations) / len(durations)) if durations else 0,
+        "p50": _percentile(sorted_durations, 50),
+        "p90": _percentile(sorted_durations, 90),
+        "p99": _percentile(sorted_durations, 99),
+        "max": max(durations) if durations else 0,
+    }
+    schema["tokens_per_sec"] = {
+        "avg": (sum(tokens_per_sec_list) / len(tokens_per_sec_list)) if tokens_per_sec_list else 0,
+        "p50": _percentile(sorted_tps, 50),
+        "max": max(tokens_per_sec_list) if tokens_per_sec_list else 0,
+    }
+    schema["thinking"] = {"on": thinking_on, "off": thinking_off}
+    schema["streaming"] = {"on": stream_on, "off": stream_off}
+    schema["finish_reason"] = finish_reason_counts
+    schema["recent"] = recent
+
+    return schema
 
 
 # ── 요청 파싱 ─────────────────────────────────────
@@ -488,6 +684,18 @@ def _run_inference_streaming_inner(params):
 
 
 # ── 엔드포인트 ────────────────────────────────────
+@app.get("/api/stats")
+async def api_stats(days: int = DEFAULT_STATS_DAYS):
+    log_dir = LOG_DIR or os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+    try:
+        return aggregate_stats(log_dir, days=days)
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": {"message": str(e), "type": "internal_error"}},
+        )
+
+
 @app.get("/v1/models")
 async def list_models():
     return {
