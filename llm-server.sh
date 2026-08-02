@@ -8,9 +8,11 @@
 #   ./llm-server.sh 1m --think   # 1M + Thinking ON
 #   ./llm-server.sh 262k 9090    # 포트 지정
 #   ./llm-server.sh qwen36       # Qwen3.6-27B 명시적 선택
+#   ./llm-server.sh qwen36-fast  # Qwen3.6-35B-A3B (MoE, 3B active — 3~4배 빠름, 품질은 27B가 우위)
 #   ./llm-server.sh supergemma4    # SuperGemma4 모델
 #   ./llm-server.sh supergemma4 --think  # SuperGemma4 + Thinking (모델이 지원하는 경우만)
 #   ./llm-server.sh --no-mtp     # MTP speculative decoding 비활성화
+#   ./llm-server.sh --no-apc     # APC prefix caching 비활성화
 #
 # Thinking 제어:
 #   기본 Thinking OFF. --think 옵션으로 기본 ON.
@@ -28,6 +30,8 @@ MODEL_CONFIG=$(find "$HF_CACHE/models--mlx-community--Qwen3.6-27B-6bit/snapshots
 PORT=8080
 USE_THINK=false
 NO_MTP=false
+NO_APC=false
+APC_DIR="$SCRIPT_DIR/.apc-cache"
 
 switch_profile() {
   if [ -z "$MODEL_CONFIG" ]; then
@@ -101,6 +105,11 @@ for arg in "$@"; do
     qwen36)
       MODEL="mlx-community/Qwen3.6-27B-6bit"
       ;;
+    qwen36-fast|fast)
+      # MoE 35B-A3B — 활성 파라미터 3B라 디코딩이 3~4배 빠르다.
+      # 품질은 27B dense가 전 벤치에서 우위이므로 대량/반복 작업용 보조 프로필.
+      MODEL="mlx-community/Qwen3.6-35B-A3B-8bit"
+      ;;
     1m|long)
       switch_profile 1m
       ;;
@@ -112,6 +121,9 @@ for arg in "$@"; do
       ;;
     --no-mtp)
       NO_MTP=true
+      ;;
+    --no-apc)
+      NO_APC=true
       ;;
     *)
       if [[ "$arg" =~ ^[0-9]+$ ]]; then
@@ -128,6 +140,11 @@ if [ "$USE_THINK" = true ]; then
 fi
 if [ "$NO_MTP" = true ]; then
   SERVER_ARGS+=(--no-draft)
+fi
+if [ "$NO_APC" = true ]; then
+  SERVER_ARGS+=(--no-apc)
+else
+  SERVER_ARGS+=(--apc-dir "$APC_DIR")
 fi
 
 # 프로필 인자 없으면 상태 표시
@@ -156,6 +173,11 @@ if [ "$NO_MTP" = false ]; then
   echo "   🚀 MTP: ON (speculative decoding, block_size=6)"
 else
   echo "   🚀 MTP: OFF"
+fi
+if [ "$NO_APC" = false ]; then
+  echo "   ♻️  APC: ON (prefix caching, disk: $APC_DIR)"
+else
+  echo "   ♻️  APC: OFF"
 fi
 echo "   📝 로깅: ON (logs/ 폴더에 저장)"
 echo "   종료: Ctrl+C"
