@@ -241,6 +241,7 @@ OpenAI 호환 API 서버. FastAPI + mlx_vlm Python API로 직접 추론.
 🌐 API 서버 시작
    로컬:     http://localhost:8080
    네트워크: http://<YOUR_LOCAL_IP>:8080
+   대시보드: http://localhost:8080/dashboard
 
    엔드포인트: /v1/chat/completions
    스트리밍: stream=true 지원
@@ -369,6 +370,31 @@ cat logs/*.jsonl | jq -r '.ip' | sort | uniq -c | sort -rn
 
 # 느린 요청 찾기 (3초 이상)
 cat logs/*.jsonl | jq 'select(.duration_ms > 3000)'
+```
+
+#### 웹 대시보드
+
+서버가 떠 있으면 **http://localhost:8080/dashboard** 에서 위 로그를 그래프로 볼 수 있습니다.
+서버에 내장되어 있어 별도 프로세스나 Docker/Grafana 없이 동작하고, 외부 CDN을 전혀 쓰지
+않으므로 오프라인에서도 그대로 뜹니다. 서버를 내리면 대시보드도 같이 내려갑니다.
+
+| 패널 | 내용 |
+|------|------|
+| 요약 카드 | 총 요청 수, 총 토큰, 평균 토큰/초, p50 / p90 응답 시간 |
+| 일별 요청 수 | 날짜별 요청 건수 |
+| 일별 토큰 | prompt vs completion 토큰 비교 |
+| 응답 시간 백분위 | p50 / p90 / p99 / max |
+| 비율 | Thinking ON/OFF, Streaming ON/OFF, 종료 사유(stop/length) |
+| 최근 요청 | 최근 50건 (시각, IP, 응답 시간, 토큰, 프롬프트) |
+
+집계 데이터는 `GET /api/stats` 로 직접 받을 수도 있습니다.
+
+```bash
+# 기본 7일
+curl -s localhost:8080/api/stats | jq
+
+# 기간 지정 (1~30일, 범위를 벗어나면 자동 보정)
+curl -s "localhost:8080/api/stats?days=30" | jq '.duration_ms'
 ```
 
 ---
