@@ -600,3 +600,132 @@ class TestStreamingEdgeCases:
         except Exception:
             # TestClient가 스트리밍 도중 예외를 전파하는 경우
             pass
+
+
+# ── 추론 호출 kwargs (temperature / APC) ─────────────────────────────────────
+class TestInferenceKwargs:
+    """mlx-vlm에 전달되는 kwargs 이름을 고정한다.
+
+    mlx-vlm의 generate()/stream_generate()는 **kwargs를 받으므로 오타난 인자명이
+    조용히 무시된다. 실제로 temp= 로 넘기던 시절 temperature가 기본값 0.0(greedy)로
+    동작했다 — 이 테스트가 그 회귀를 막는다.
+    """
+
+    def _generate_kwargs(self):
+        return server_module.generate.call_args.kwargs
+
+    def test_temperature_kwarg_name(self, client):
+        """temp= 가 아니라 temperature= 로 전달되어야 한다"""
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+            "temperature": 0.3,
+        })
+        assert resp.status_code == 200
+        kwargs = self._generate_kwargs()
+        assert kwargs["temperature"] == 0.3
+        assert "temp" not in kwargs
+
+    def test_temperature_default_is_openai_default(self, client):
+        """미지정 시 OpenAI 기본값 1.0이 그대로 전달된다"""
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+        })
+        assert resp.status_code == 200
+        assert self._generate_kwargs()["temperature"] == 1.0
+
+    def test_apc_manager_passed(self, client):
+        """APC 매니저가 generate()에 전달된다"""
+        sentinel = MagicMock()
+        server_module.apc_manager = sentinel
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+        })
+        assert resp.status_code == 200
+        assert self._generate_kwargs()["apc_manager"] is sentinel
+
+    def test_apc_manager_none_when_disabled(self, client):
+        """APC 비활성화 시 apc_manager=None으로 전달된다"""
+        server_module.apc_manager = None
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+        })
+        assert resp.status_code == 200
+        assert self._generate_kwargs()["apc_manager"] is None
+
+    def test_prompt_cache_state_kept_for_text_only(self, client):
+        """이미지 없는 요청은 KV 캐시를 재사용한다"""
+        cache = MagicMock()
+        server_module.prompt_cache_state = cache
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+        })
+        assert resp.status_code == 200
+        assert self._generate_kwargs()["prompt_cache_state"] is cache
+
+    def test_prompt_cache_state_disabled_for_images(self, client):
+        """이미지 요청은 prompt_cache_state=None (Metal KV 정합성 가드 유지)"""
+        server_module.extract_images = MagicMock(return_value=[MagicMock()])
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "이 이미지 설명해줘"}],
+        })
+        assert resp.status_code == 200
+        assert self._generate_kwargs()["prompt_cache_state"] is None
+
+    def test_streaming_uses_same_kwargs(self, client):
+        """스트리밍 경로도 temperature / apc_manager를 동일하게 전달한다"""
+        captured = {}
+
+        def capturing_stream(model, processor, prompt, image=None, **kwargs):
+            captured.update(kwargs)
+            yield MockResponse("hi", generation_tokens=1, finish_reason="stop")
+
+        server_module.stream_generate = capturing_stream
+        sentinel = MagicMock()
+        server_module.apc_manager = sentinel
+
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+            "temperature": 0.7,
+            "stream": True,
+        })
+        assert resp.status_code == 200
+        list(resp.iter_lines())
+        assert captured["temperature"] == 0.7
+        assert "temp" not in captured
+        assert captured["apc_manager"] is sentinel
+
+
+# ── APC 매니저 생성 ──────────────────────────────────────────────────────────
+class TestMakeAPCManager:
+    @pytest.fixture(autouse=True)
+    def reset_apc_mocks(self):
+        # APCManager/DiskBlockStore는 모듈 로드 시 바인딩된 공유 MagicMock —
+        # 이전 테스트의 호출 기록이 남지 않도록 초기화한다
+        server_module.APCManager.reset_mock()
+        server_module.DiskBlockStore.reset_mock()
+        yield
+
+    def test_returns_none_when_disabled(self):
+        server_module.APC_ENABLED = False
+        assert server_module._make_apc_manager() is None
+
+    def test_memory_only_when_no_dir(self):
+        server_module.APC_ENABLED = True
+        server_module.APC_DIR = ""
+        server_module._make_apc_manager()
+        # disk 없이 생성 — DiskBlockStore는 호출되지 않아야 한다
+        assert server_module.APCManager.call_args.kwargs["disk"] is None
+
+    def test_disk_store_when_dir_set(self):
+        server_module.APC_ENABLED = True
+        server_module.APC_DIR = "/tmp/llm-test-apc"
+        server_module._make_apc_manager()
+        assert server_module.APCManager.call_args.kwargs["disk"] is not None
+        assert server_module.DiskBlockStore.called
