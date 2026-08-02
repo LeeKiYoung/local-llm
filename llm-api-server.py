@@ -25,7 +25,7 @@ from functools import partial
 import mlx.core as mx
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 import base64
 import io
 from PIL import Image
@@ -353,6 +353,323 @@ def aggregate_stats(log_dir, days=DEFAULT_STATS_DAYS) -> dict:
     schema["recent"] = recent
 
     return schema
+
+
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM 서버 모니터링</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: #0e1117;
+    color: #e6e6e6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 20px; }
+  select, button {
+    background: #1b1f2a;
+    color: #e6e6e6;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button:hover, select:hover { border-color: #555; }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: #1b1f2a;
+    border: 1px solid #262b38;
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .card .label { font-size: 12px; color: #9aa0ac; margin-bottom: 6px; }
+  .card .value { font-size: 22px; font-weight: 600; }
+  section { margin-bottom: 28px; }
+  section h2 { font-size: 14px; color: #9aa0ac; margin: 0 0 10px; font-weight: 500; }
+  canvas { background: #1b1f2a; border: 1px solid #262b38; border-radius: 8px; width: 100%; height: 180px; }
+  .ratio-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 13px; }
+  .ratio-row .ratio-label { width: 110px; color: #9aa0ac; }
+  .ratio-bar { flex: 1; height: 10px; background: #262b38; border-radius: 5px; overflow: hidden; display: flex; }
+  .ratio-bar .seg { height: 100%; background: #4f8cff; }
+  .ratio-bar .seg.alt { background: #3a3f4b; }
+  .ratio-count { width: 90px; text-align: right; color: #9aa0ac; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #262b38; }
+  th { color: #9aa0ac; font-weight: 500; }
+  .empty { color: #666; font-size: 13px; padding: 20px 0; }
+</style>
+</head>
+<body>
+  <h1>LLM 서버 모니터링</h1>
+  <div class="toolbar">
+    <select id="period">
+      <option value="1">1일</option>
+      <option value="7" selected>7일</option>
+      <option value="30">30일</option>
+    </select>
+    <button id="refresh">새로고침</button>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <section>
+    <h2>일별 요청 수</h2>
+    <canvas id="chartRequests"></canvas>
+  </section>
+
+  <section>
+    <h2>일별 토큰 (prompt vs completion)</h2>
+    <canvas id="chartTokens"></canvas>
+  </section>
+
+  <section>
+    <h2>응답 시간 백분위 (ms)</h2>
+    <canvas id="chartDuration"></canvas>
+  </section>
+
+  <section>
+    <h2>Thinking / Streaming / 종료 사유</h2>
+    <div id="ratios"></div>
+  </section>
+
+  <section>
+    <h2>최근 요청</h2>
+    <div id="recentWrap"></div>
+  </section>
+
+<script>
+function fmt(n) {
+  if (n === null || n === undefined) return "-";
+  if (typeof n !== "number") return String(n);
+  return n >= 1000 ? n.toLocaleString(undefined, {maximumFractionDigits: 1}) : Math.round(n * 10) / 10;
+}
+
+function clearEl(el) {
+  el.innerHTML = "";
+}
+
+function renderCards(data) {
+  const cards = document.getElementById("cards");
+  clearEl(cards);
+  const items = [
+    ["총 요청 수", fmt(data.total_requests)],
+    ["총 토큰", fmt(data.tokens.total)],
+    ["평균 토큰/초", fmt(data.tokens_per_sec.avg)],
+    ["p50 응답시간 (ms)", fmt(data.duration_ms.p50)],
+    ["p90 응답시간 (ms)", fmt(data.duration_ms.p90)],
+  ];
+  items.forEach(([label, value]) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    const l = document.createElement("div");
+    l.className = "label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "value";
+    v.textContent = String(value);
+    card.appendChild(l);
+    card.appendChild(v);
+    cards.appendChild(card);
+  });
+}
+
+function drawBarChart(canvas, labels, series, colors) {
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || 600;
+  const cssHeight = 180;
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  if (!labels.length) {
+    ctx.fillStyle = "#666";
+    ctx.font = "13px -apple-system, sans-serif";
+    ctx.fillText("데이터 없음", 12, cssHeight / 2);
+    return;
+  }
+
+  const padding = 24;
+  const chartW = cssWidth - padding * 2;
+  const chartH = cssHeight - padding * 2;
+  const groupCount = labels.length;
+  const seriesCount = series.length;
+  const maxVal = Math.max(1, ...series.flatMap(s => s.values));
+  const groupWidth = chartW / groupCount;
+  const barWidth = (groupWidth * 0.7) / seriesCount;
+
+  labels.forEach((label, gi) => {
+    series.forEach((s, si) => {
+      const val = s.values[gi] || 0;
+      const barH = (val / maxVal) * chartH;
+      const x = padding + gi * groupWidth + (groupWidth * 0.15) + si * barWidth;
+      const y = padding + chartH - barH;
+      ctx.fillStyle = colors[si % colors.length];
+      ctx.fillRect(x, y, Math.max(barWidth - 2, 1), barH);
+    });
+  });
+
+  ctx.fillStyle = "#9aa0ac";
+  ctx.font = "10px -apple-system, sans-serif";
+  labels.forEach((label, gi) => {
+    const x = padding + gi * groupWidth + groupWidth / 2;
+    ctx.textAlign = "center";
+    ctx.fillText(label.slice(5), x, cssHeight - 6);
+  });
+}
+
+function renderCharts(data) {
+  const daily = data.daily || [];
+  const labels = daily.map(d => d.date);
+
+  drawBarChart(
+    document.getElementById("chartRequests"),
+    labels,
+    [{ values: daily.map(d => d.requests) }],
+    ["#4f8cff"]
+  );
+
+  drawBarChart(
+    document.getElementById("chartTokens"),
+    labels,
+    [
+      { values: daily.map(d => d.prompt_tokens) },
+      { values: daily.map(d => d.completion_tokens) },
+    ],
+    ["#4f8cff", "#8a5cf6"]
+  );
+
+  const d = data.duration_ms;
+  drawBarChart(
+    document.getElementById("chartDuration"),
+    ["p50", "p90", "p99", "max"],
+    [{ values: [d.p50, d.p90, d.p99, d.max] }],
+    ["#ff8a4f"]
+  );
+}
+
+function renderRatioRow(container, label, onCount, offCount, onLabel, offLabel) {
+  const total = Math.max(1, onCount + offCount);
+  const row = document.createElement("div");
+  row.className = "ratio-row";
+
+  const l = document.createElement("div");
+  l.className = "ratio-label";
+  l.textContent = label;
+
+  const bar = document.createElement("div");
+  bar.className = "ratio-bar";
+  const segOn = document.createElement("div");
+  segOn.className = "seg";
+  segOn.style.width = (onCount / total * 100) + "%";
+  const segOff = document.createElement("div");
+  segOff.className = "seg alt";
+  segOff.style.width = (offCount / total * 100) + "%";
+  bar.appendChild(segOn);
+  bar.appendChild(segOff);
+
+  const count = document.createElement("div");
+  count.className = "ratio-count";
+  count.textContent = onLabel + " " + onCount + " / " + offLabel + " " + offCount;
+
+  row.appendChild(l);
+  row.appendChild(bar);
+  row.appendChild(count);
+  container.appendChild(row);
+}
+
+function renderRatios(data) {
+  const container = document.getElementById("ratios");
+  clearEl(container);
+  renderRatioRow(container, "Thinking", data.thinking.on, data.thinking.off, "ON", "OFF");
+  renderRatioRow(container, "Streaming", data.streaming.on, data.streaming.off, "ON", "OFF");
+
+  const fr = data.finish_reason || {};
+  const stop = fr.stop || 0;
+  const length = fr.length || 0;
+  renderRatioRow(container, "종료 사유", stop, length, "stop", "length");
+}
+
+function renderRecent(data) {
+  const wrap = document.getElementById("recentWrap");
+  clearEl(wrap);
+  const recent = data.recent || [];
+  if (!recent.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "최근 요청이 없습니다.";
+    wrap.appendChild(empty);
+    return;
+  }
+
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  ["시간", "IP", "Thinking", "Stream", "ms", "토큰", "종료", "프롬프트"].forEach(h => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  recent.forEach(r => {
+    const tr = document.createElement("tr");
+    const cells = [
+      r.timestamp || "",
+      r.ip || "",
+      r.enable_thinking ? "ON" : "OFF",
+      r.stream ? "ON" : "OFF",
+      String(r.duration_ms),
+      String(r.total_tokens),
+      r.finish_reason || "",
+      r.prompt_preview || "",
+    ];
+    cells.forEach(text => {
+      const td = document.createElement("td");
+      // CRITICAL: 반드시 textContent — prompt_preview/content_preview는 사용자 원문이라
+      // innerHTML로 렌더링하면 저장된 XSS가 된다.
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+}
+
+async function loadStats() {
+  const days = document.getElementById("period").value;
+  const resp = await fetch("/api/stats?days=" + encodeURIComponent(days));
+  const data = await resp.json();
+  renderCards(data);
+  renderCharts(data);
+  renderRatios(data);
+  renderRecent(data);
+}
+
+document.getElementById("refresh").addEventListener("click", loadStats);
+document.getElementById("period").addEventListener("change", loadStats);
+window.addEventListener("resize", loadStats);
+loadStats();
+</script>
+</body>
+</html>
+"""
 
 
 # ── 요청 파싱 ─────────────────────────────────────
@@ -694,6 +1011,11 @@ async def api_stats(days: int = DEFAULT_STATS_DAYS):
             status_code=500,
             content={"error": {"message": str(e), "type": "internal_error"}},
         )
+
+
+@app.get("/dashboard")
+async def dashboard():
+    return HTMLResponse(DASHBOARD_HTML)
 
 
 @app.get("/v1/models")
