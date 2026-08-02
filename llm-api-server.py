@@ -32,6 +32,7 @@ from mlx_vlm import load, generate, stream_generate
 from mlx_vlm.prompt_utils import apply_chat_template
 from mlx_vlm.generate import PromptCacheState
 from mlx_vlm.vision_cache import VisionFeatureCache
+from mlx_vlm.apc import APCManager, DiskBlockStore
 
 # 압축 폭탄(decompression bomb) 방지 — 50MP 이상 이미지 거부 (PIL 기본값 약 178MP)
 Image.MAX_IMAGE_PIXELS = 50_000_000
@@ -52,6 +53,9 @@ LOG_DIR = ""
 DEFAULT_THINKING = False
 prompt_cache_state = None   # KV-캐시 재사용 (PromptCacheState, 턴 간 프리필 절감)
 vision_cache = None         # 비전 피처 캐시 (VisionFeatureCache, 동일 이미지 재인코딩 방지)
+apc_manager = None          # APC 블록 캐시 (APCManager, 요청 간 공통 프리픽스 프리필 재사용)
+APC_ENABLED = True          # APC 사용 여부 (--no-apc로 비활성화)
+APC_DIR = ""                # APC 디스크 영속 경로 (빈 문자열이면 메모리 전용)
 PREFILL_STEP_SIZE = 512     # 청크 프리필 크기 (토큰) — 낮을수록 OOM 위험 감소
 DRAFT_KIND = "mtp"          # speculative decoding 드래프트 종류 (mtp 기본값, None이면 비활성화)
 DRAFT_BLOCK_SIZE = 6        # MTP round당 토큰 수 (draft_block_size)
@@ -62,10 +66,25 @@ _MTP_SUPPORTED = False      # mlx-vlm 버전 MTP 지원 여부 (main() 시작 �
 _LARGE_PREFILL_CHAR_THRESHOLD = 350_000  # ~100K 토큰
 
 
+def _make_apc_manager():
+    """APCManager 생성 — APC_DIR이 지정되면 디스크 영속 블록 스토어를 붙인다.
+
+    APC(automatic prefix caching)는 요청 간 공통 프리픽스(시스템 프롬프트 등)의 KV 블록을
+    재사용해 프리필을 건너뛴다. mlx-vlm 0.6.5+ 필요.
+    """
+    if not APC_ENABLED:
+        return None
+    disk = None
+    if APC_DIR:
+        from pathlib import Path
+        disk = DiskBlockStore(Path(APC_DIR))
+    return APCManager(disk=disk)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """모델을 _gpu_executor 스레드에서 로드 — 해당 스레드에 MLX 스트림 자연 초기화."""
-    global gpu_semaphore, model, processor, prompt_cache_state, vision_cache
+    global gpu_semaphore, model, processor, prompt_cache_state, vision_cache, apc_manager
     gpu_semaphore = asyncio.Semaphore(1)
     loop = asyncio.get_running_loop()
 
@@ -73,10 +92,12 @@ async def lifespan(_app: FastAPI):
         m, p = load(model_id)
         pcs = PromptCacheState()
         vc = VisionFeatureCache()
-        return m, p, pcs, vc
+        # APCManager도 같은 스레드에서 생성 — KV 블록이 이 스레드의 MLX 스트림에 묶임
+        apc = _make_apc_manager()
+        return m, p, pcs, vc, apc
 
     print(f"📥 모델 로딩: {model_id}")
-    model, processor, prompt_cache_state, vision_cache = await loop.run_in_executor(
+    model, processor, prompt_cache_state, vision_cache, apc_manager = await loop.run_in_executor(
         _gpu_executor, _do_load
     )
     print(f"✅ 모델 로드 완료")
@@ -343,10 +364,13 @@ def _run_inference_inner(params):
         formatted,
         image=images if images else None,   # 이미지 없을 때 빈 리스트 아닌 None (per RESEARCH)
         max_tokens=params["max_tokens"],
-        temp=params["temperature"],
+        # mlx-vlm의 정식 파라미터명은 temperature — temp로 넘기면 **kwargs로 흘러
+        # 모델 forward에서 삼켜지고 기본값 0.0(greedy)으로 동작한다
+        temperature=params["temperature"],
         top_p=params["top_p"],
         prompt_cache_state=None if images else prompt_cache_state,
         vision_cache=vision_cache,
+        apc_manager=apc_manager,
         prefill_step_size=PREFILL_STEP_SIZE,
         **draft_kwargs,
     )
@@ -407,10 +431,11 @@ def _run_inference_streaming_inner(params):
             formatted,
             image=images if images else None,
             max_tokens=params["max_tokens"],
-            temp=params["temperature"],
+            temperature=params["temperature"],   # temp 아님 (run_inference 주석 참조)
             top_p=params["top_p"],
             prompt_cache_state=None if images else prompt_cache_state,
             vision_cache=vision_cache,
+            apc_manager=apc_manager,
             prefill_step_size=PREFILL_STEP_SIZE,
             **draft_kwargs,
         ):
@@ -610,6 +635,7 @@ def _stream_response(req_id, params, ip, start, last_msg):
 # ── 메인 ─────────────────────────────────────────
 def main():
     global model_id, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING, DRAFT_KIND, DRAFT_BLOCK_SIZE, _MTP_SUPPORTED
+    global APC_ENABLED, APC_DIR
 
     parser = argparse.ArgumentParser(description="Local LLM API Server")
     parser.add_argument("--model", type=str, default="mlx-community/Qwen3.6-27B-6bit")
@@ -624,6 +650,10 @@ def main():
                         help="MTP round당 토큰 수 (기본값: 6)")
     parser.add_argument("--no-draft", action="store_true", default=False,
                         help="Speculative decoding 비활성화")
+    parser.add_argument("--no-apc", action="store_true", default=False,
+                        help="APC(prefix caching) 비활성화")
+    parser.add_argument("--apc-dir", type=str, default="",
+                        help="APC 블록 디스크 영속 경로 (미지정 시 메모리 전용)")
     args = parser.parse_args()
 
     model_id = args.model
@@ -631,8 +661,12 @@ def main():
     DEFAULT_THINKING = args.think
     DRAFT_KIND = None if args.no_draft else args.draft_kind
     DRAFT_BLOCK_SIZE = args.draft_block_size
+    APC_ENABLED = not args.no_apc
+    APC_DIR = args.apc_dir
     LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
     os.makedirs(LOG_DIR, exist_ok=True)
+    if APC_ENABLED and APC_DIR:
+        os.makedirs(APC_DIR, exist_ok=True)
 
     # mlx-vlm 버전에서 MTP 지원 여부 감지 (PR #1115 이상 필요)
     try:
@@ -660,6 +694,10 @@ def main():
         print(f"   🚀 MTP: ON ({DRAFT_KIND}, block_size={DRAFT_BLOCK_SIZE})")
     else:
         print(f"   🚀 MTP: OFF")
+    if APC_ENABLED:
+        print(f"   ♻️  APC: ON ({'disk: ' + APC_DIR if APC_DIR else '메모리 전용'})")
+    else:
+        print(f"   ♻️  APC: OFF")
     print(f"   📝 로깅: {LOG_DIR}/")
     print(f"   종료: Ctrl+C")
     print()

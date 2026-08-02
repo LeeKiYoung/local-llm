@@ -23,10 +23,12 @@ mock_mlx_vlm = MagicMock()
 mock_mlx_vlm_prompt_utils = MagicMock()
 mock_mlx_vlm_generate = MagicMock()
 mock_mlx_vlm_vision_cache = MagicMock()
+mock_mlx_vlm_apc = MagicMock()
 sys.modules["mlx_vlm"] = mock_mlx_vlm
 sys.modules["mlx_vlm.prompt_utils"] = mock_mlx_vlm_prompt_utils
 sys.modules["mlx_vlm.generate"] = mock_mlx_vlm_generate
 sys.modules["mlx_vlm.vision_cache"] = mock_mlx_vlm_vision_cache
+sys.modules["mlx_vlm.apc"] = mock_mlx_vlm_apc
 
 # PIL mock (Pillow 없는 환경에서도 테스트 가능)
 mock_pil = MagicMock()
@@ -91,6 +93,9 @@ def setup():
     server_module.DEFAULT_THINKING = False
     server_module.prompt_cache_state = MagicMock()
     server_module.vision_cache = MagicMock()
+    server_module.apc_manager = MagicMock()
+    server_module.APC_ENABLED = True
+    server_module.APC_DIR = ""
     server_module.PREFILL_STEP_SIZE = 512
     server_module.LOG_DIR = "/tmp/llm-test-logs"
     os.makedirs("/tmp/llm-test-logs", exist_ok=True)
