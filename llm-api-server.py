@@ -38,7 +38,7 @@ from mlx_vlm.apc import APCManager, DiskBlockStore
 Image.MAX_IMAGE_PIXELS = 50_000_000
 
 # ── 글로벌 ────────────────────────────────────────
-# MLX 0.31.2: stream이 thread-local이므로 모델 로드와 모든 추론을 같은 스레드에서 실행해야 함.
+# MLX 0.32.0: stream이 thread-local이므로 모델 로드와 모든 추론을 같은 스레드에서 실행해야 함.
 # max_workers=1 executor에서 모델 로드 → 그 스레드에 stream(gpu,0/1/2) 자연 생성.
 # 이후 모든 inference도 같은 executor 사용 → stream 문제 없음.
 _gpu_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)

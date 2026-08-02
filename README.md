@@ -14,6 +14,7 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 | 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
 | **Qwen3.6-27B-6bit** (기본) | `./llm-server.sh` | ~23GB | ~12 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
+| **Qwen3.6-35B-A3B-8bit** (빠른 프로필) | `./llm-server.sh qwen36-fast` | ~37GB | 3~4배⁴ | MoE(활성 3B) 멀티모달. 대량·반복 작업용 — 품질은 27B dense가 우위 |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
 | **SuperGemma4-26B abliterated-multimodal** | 직접 모델 ID 지정¹ | ~15GB | ~49 tok/s | 무검열(EGA), 이미지+텍스트 입력 지원 |
 
@@ -22,6 +23,8 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 > ¹ abliterated-multimodal은 `python llm-api-server.py --model Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit`로 직접 실행.
 
 > ³ M5 Pro 64GB 실측 (MTP speculative decoding ON, block_size=6). Dense 27B 모델의 이론 상한(~7.6 tok/s)을 MTP가 약 60% 개선.
+
+> ⁴ 27B dense 대비 상대 속도(공개 벤치 기준, 본 프로젝트 미실측). Qwen 공식 벤치에서 27B dense가 35B-A3B를 전 항목에서 앞서며 SkillsBench(코딩 에이전트)는 +15.5점 차이 — 기본 모델은 27B를 유지한다.
 
 ### 모델별 지원 기능
 
@@ -80,7 +83,7 @@ cd local-llm
 `setup.sh`가 자동으로:
 1. Apple Silicon / Python / 메모리 확인
 2. 메모리에 맞는 모델 선택 메뉴 표시
-3. 가상환경 생성 + **mlx-vlm==0.6.3** (Qwen MTP/KV cache 수정 포함) + FastAPI + uvicorn 설치
+3. 가상환경 생성 + **mlx-vlm==0.6.8 / mlx==0.32.0** (Qwen MTP/KV cache/MRoPE 수정, APC 포함) + FastAPI + uvicorn 설치
 4. 선택한 모델 다운로드 + 스크립트에 자동 반영
 
 | # | 모델 | 메모리 | 특징 |
@@ -129,10 +132,11 @@ local-llm/
 │   ├── config-qwen36-27b-262k.json       # 기본 프로필 (262K, Qwen3.6-27B)
 │   └── config-qwen36-27b-1m.json         # 확장 프로필 (1M YaRN, Qwen3.6-27B)
 ├── tests/
-│   ├── test_api_server.py                # API 서버 테스트 (33개)
+│   ├── test_api_server.py                # API 서버 테스트 (51개)
 │   └── test_proxy.py                     # 프록시 테스트
 ├── local-llm-guide-2026.md               # 모델 비교 가이드 문서
 ├── .venv/                                # Python 가상환경
+├── .apc-cache/                           # APC prefix cache 블록 (자동 생성)
 └── logs/                                 # 요청/응답 JSONL 로그 (자동 생성)
 ```
 
@@ -156,6 +160,9 @@ cd local-llm
 
 # 1M 컨텍스트 모드
 ./llm-server.sh 1m
+
+# Qwen3.6-35B-A3B (MoE, 빠른 프로필)
+./llm-server.sh qwen36-fast
 
 # SuperGemma4
 ./llm-server.sh supergemma4
@@ -219,6 +226,10 @@ OpenAI 호환 API 서버. FastAPI + mlx_vlm Python API로 직접 추론.
 ./llm-server.sh 262k 9090    # 포트 지정
 ./llm-server.sh --think      # Thinking 기본 ON
 ./llm-server.sh --no-mtp     # MTP speculative decoding 비활성화
+./llm-server.sh --no-apc     # APC prefix caching 비활성화
+
+# Qwen3.6-35B-A3B (MoE, 빠른 프로필)
+./llm-server.sh qwen36-fast          # 첫 실행 시 ~37GB 자동 다운로드
 
 # SuperGemma4
 ./llm-server.sh supergemma4          # 첫 실행 시 ~16GB 자동 다운로드
@@ -430,9 +441,44 @@ MTP는 Qwen3.6-27B 모델 가중치에 `mtp_num_hidden_layers: 1`로 **내장된
 
 ### 요구사항
 
-- mlx-vlm **0.6.3+** 권장 (Qwen MTP prefill, quantized KV cache, thinking 기본값 관련 수정 포함)
-- `setup.sh`가 자동으로 설치: `pip install mlx-vlm==0.6.3`
+- mlx-vlm **0.6.8** 고정 (Qwen MTP prefill, quantized KV cache, MRoPE 위치 수정 포함)
+- `setup.sh`가 자동으로 설치: `pip install mlx-vlm==0.6.8 mlx==0.32.0`
 - 구버전 설치 시 서버 시작 시 자동 감지 후 graceful fallback (MTP 비활성화 경고 출력)
+
+---
+
+## APC (Prefix Caching)
+
+> mlx-vlm 0.6.5+ 의 Automatic Prefix Caching. 기본 ON.
+
+### 개요
+
+APC는 요청 간 **공통 프리픽스의 KV 블록을 재사용**해 프리필을 건너뜁니다. openclaw처럼
+매 요청에 동일한 시스템 프롬프트를 붙여 보내는 클라이언트에서 TTFT(첫 토큰까지 시간)가
+줄어듭니다.
+
+- **출력 품질 영향 없음** — 이미 계산된 KV를 재사용할 뿐, 샘플링에는 관여하지 않음
+- **디스크 영속** — 블록을 `.apc-cache/`에 저장해 서버 재시작 후에도 워밍 상태 유지
+- 기존 `PromptCacheState`(직전 턴 KV 재사용) / `VisionFeatureCache`(이미지 재인코딩 방지)와 **병행 동작**
+
+### 기본값: ON
+
+```
+♻️  APC: ON (prefix caching, disk: /path/to/local-llm/.apc-cache)
+```
+
+### 비활성화 / 경로 변경
+
+```bash
+./llm-server.sh --no-apc                            # 끄기
+python llm-api-server.py --apc-dir /path/to/cache   # 경로 지정
+python llm-api-server.py --apc-dir ""               # 메모리 전용 (디스크 미사용)
+```
+
+### 알려진 제약
+
+이미지가 포함된 요청은 `prompt_cache_state`를 비활성화합니다(Metal KV 정합성 가드).
+APC 자체는 멀티모달 프리픽스를 인식하지만, 이 가드는 유지되고 있습니다.
 
 ---
 
@@ -490,6 +536,12 @@ Qwen3.6-27B는 Thinking 기본 OFF (DEFAULT_THINKING=False). 요청 시 enable_t
 | 0.3 | 약간의 변화 | 일반 대화 |
 | 0.7 | 창의적 | 글쓰기, 브레인스토밍 |
 | 1.0+ | 매우 랜덤 | 실험용 |
+
+> **⚠️ 동작 변경 (2026-08-02)**
+> 이전 버전은 mlx-vlm에 `temp=`라는 잘못된 인자명으로 값을 넘겨 **클라이언트가 보낸
+> temperature가 무시되고 항상 0.0(greedy)으로 동작**했습니다. 이제 정상 반영됩니다.
+> 미지정 시 OpenAI 기본값인 **1.0**이 적용되므로, 이전과 같은 결정적 출력을 원하면
+> 요청에 `"temperature": 0.0`을 명시하세요.
 
 ### Max Tokens
 
