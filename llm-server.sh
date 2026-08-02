@@ -31,7 +31,6 @@ PORT=8080
 USE_THINK=false
 NO_MTP=false
 NO_APC=false
-APC_DIR="$SCRIPT_DIR/.apc-cache"
 
 switch_profile() {
   if [ -z "$MODEL_CONFIG" ]; then
@@ -143,9 +142,11 @@ if [ "$NO_MTP" = true ]; then
 fi
 if [ "$NO_APC" = true ]; then
   SERVER_ARGS+=(--no-apc)
-else
-  SERVER_ARGS+=(--apc-dir "$APC_DIR")
 fi
+# --apc-dir는 넘기지 않는다 = 메모리 전용.
+# Qwen3.6-27B는 hybrid(linear+full attention)라 APC가 block이 아닌 exact 모드로 동작하고,
+# 실측 결과 히트 0회 / 디스크만 1.4GB 소모했다. 디스크 영속이 필요하면 llm-api-server.py에
+# --apc-dir를 직접 지정할 것.
 
 # 프로필 인자 없으면 상태 표시
 if ! echo "$@" | grep -qE "1m|long|262k|default"; then
@@ -175,7 +176,7 @@ else
   echo "   🚀 MTP: OFF"
 fi
 if [ "$NO_APC" = false ]; then
-  echo "   ♻️  APC: ON (prefix caching, disk: $APC_DIR)"
+  echo "   ♻️  APC: ON (prefix caching, 메모리 전용)"
 else
   echo "   ♻️  APC: OFF"
 fi

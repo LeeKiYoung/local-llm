@@ -764,3 +764,96 @@ class TestMakeAPCManager:
         server_module.APC_MAX_GB = 0
         server_module._make_apc_manager()
         assert server_module.DiskBlockStore.call_args.kwargs["max_bytes"] is None
+
+
+# ── 샘플링 파라미터 전달 ─────────────────────────────────────────────────────
+class TestSamplingParams:
+    """parse_request가 읽은 샘플링 파라미터가 실제로 generate()까지 도달하는지 검증.
+
+    temp→temperature 사고와 동일하게, 파싱만 하고 전달하지 않으면 조용히 무시된다.
+    """
+
+    def _kwargs(self):
+        return server_module.generate.call_args.kwargs
+
+    def test_seed_forwarded(self, client):
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+            "seed": 1234,
+        })
+        assert resp.status_code == 200
+        assert self._kwargs()["seed"] == 1234
+
+    def test_repetition_penalty_forwarded(self, client):
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+            "repetition_penalty": 1.15,
+        })
+        assert resp.status_code == 200
+        assert self._kwargs()["repetition_penalty"] == 1.15
+
+    def test_presence_and_frequency_penalty_forwarded(self, client):
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+            "presence_penalty": 0.5,
+            "frequency_penalty": 0.8,
+        })
+        assert resp.status_code == 200
+        kwargs = self._kwargs()
+        assert kwargs["presence_penalty"] == 0.5
+        assert kwargs["frequency_penalty"] == 0.8
+
+    def test_zero_penalties_become_none(self, client):
+        """penalty 0 = '적용 안 함' → mlx-vlm 기본값(None)으로 넘긴다"""
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+        })
+        assert resp.status_code == 200
+        kwargs = self._kwargs()
+        assert kwargs["presence_penalty"] is None
+        assert kwargs["frequency_penalty"] is None
+
+    def test_streaming_forwards_sampling_params(self, client):
+        captured = {}
+
+        def capturing_stream(model, processor, prompt, image=None, **kwargs):
+            captured.update(kwargs)
+            yield MockResponse("hi", generation_tokens=1, finish_reason="stop")
+
+        server_module.stream_generate = capturing_stream
+        resp = client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "test"}],
+            "seed": 77,
+            "repetition_penalty": 1.05,
+            "stream": True,
+        })
+        assert resp.status_code == 200
+        list(resp.iter_lines())
+        assert captured["seed"] == 77
+        assert captured["repetition_penalty"] == 1.05
+
+    def test_both_paths_send_identical_kwarg_names(self, client):
+        """비스트리밍/스트리밍이 같은 인자 집합을 넘겨야 한다 (경로 분기 방지)"""
+        captured = {}
+
+        def capturing_stream(model, processor, prompt, image=None, **kwargs):
+            captured.update(kwargs)
+            yield MockResponse("hi", generation_tokens=1, finish_reason="stop")
+
+        body = {"model": "test-model", "messages": [{"role": "user", "content": "t"}]}
+        client.post("/v1/chat/completions", json=body)
+        non_stream = set(self._kwargs())
+
+        server_module.stream_generate = capturing_stream
+        resp = client.post("/v1/chat/completions", json={**body, "stream": True})
+        list(resp.iter_lines())
+
+        sampling = {"temperature", "top_p", "seed", "repetition_penalty",
+                    "presence_penalty", "frequency_penalty"}
+        assert sampling <= non_stream
+        assert sampling <= set(captured)

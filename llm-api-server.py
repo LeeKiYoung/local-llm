@@ -334,6 +334,26 @@ def make_chunk(req_id, model_name, delta, finish_reason=None):
 
 
 # ── 추론 ─────────────────────────────────────────
+def _sampling_kwargs(params):
+    """parse_request 결과를 mlx-vlm 샘플링 kwargs로 변환.
+
+    비스트리밍/스트리밍 두 경로가 같은 값을 넘기도록 한 곳에서 만든다 — 두 호출부가
+    갈리면서 인자가 조용히 누락되는 사고가 이미 한 번 있었다(temp→temperature).
+    penalty 0은 "적용 안 함"이므로 None으로 넘긴다.
+
+    OpenAI의 stop은 아직 전달하지 않는다: mlx-vlm의 eos_tokens 처리가 generate()에만
+    있고 stream_generate()에는 없어 스트리밍/비스트리밍 동작이 갈린다.
+    """
+    return {
+        "temperature": params["temperature"],
+        "top_p": params["top_p"],
+        "seed": params["seed"],
+        "repetition_penalty": params["repetition_penalty"],
+        "presence_penalty": params["presence_penalty"] or None,
+        "frequency_penalty": params["frequency_penalty"] or None,
+    }
+
+
 def run_inference(params):
     return _run_inference_inner(params)
 
@@ -375,8 +395,7 @@ def _run_inference_inner(params):
         max_tokens=params["max_tokens"],
         # mlx-vlm의 정식 파라미터명은 temperature — temp로 넘기면 **kwargs로 흘러
         # 모델 forward에서 삼켜지고 기본값 0.0(greedy)으로 동작한다
-        temperature=params["temperature"],
-        top_p=params["top_p"],
+        **_sampling_kwargs(params),
         prompt_cache_state=None if images else prompt_cache_state,
         vision_cache=vision_cache,
         apc_manager=apc_manager,
@@ -440,8 +459,7 @@ def _run_inference_streaming_inner(params):
             formatted,
             image=images if images else None,
             max_tokens=params["max_tokens"],
-            temperature=params["temperature"],   # temp 아님 (run_inference 주석 참조)
-            top_p=params["top_p"],
+            **_sampling_kwargs(params),   # temp 아님 (_sampling_kwargs 주석 참조)
             prompt_cache_state=None if images else prompt_cache_state,
             vision_cache=vision_cache,
             apc_manager=apc_manager,

@@ -132,11 +132,10 @@ local-llm/
 │   ├── config-qwen36-27b-262k.json       # 기본 프로필 (262K, Qwen3.6-27B)
 │   └── config-qwen36-27b-1m.json         # 확장 프로필 (1M YaRN, Qwen3.6-27B)
 ├── tests/
-│   ├── test_api_server.py                # API 서버 테스트 (51개)
+│   ├── test_api_server.py                # API 서버 테스트 (60개)
 │   └── test_proxy.py                     # 프록시 테스트
 ├── local-llm-guide-2026.md               # 모델 비교 가이드 문서
 ├── .venv/                                # Python 가상환경
-├── .apc-cache/                           # APC prefix cache 블록 (자동 생성)
 └── logs/                                 # 요청/응답 JSONL 로그 (자동 생성)
 ```
 
@@ -458,29 +457,42 @@ APC는 요청 간 **공통 프리픽스의 KV 블록을 재사용**해 프리필
 줄어듭니다.
 
 - **출력 품질 영향 없음** — 이미 계산된 KV를 재사용할 뿐, 샘플링에는 관여하지 않음
-- **디스크 영속** — 블록을 `.apc-cache/`에 저장해 서버 재시작 후에도 워밍 상태 유지
-- **모델별 격리** — 캐시 namespace를 model_id로 파생하므로 `qwen36` / `qwen36-fast`가
+- **모델별 격리** — 디스크 캐시 namespace를 model_id로 파생하므로 `qwen36` / `qwen36-fast`가
   같은 디렉터리를 써도 서로의 KV 블록을 재사용하지 않음
 - 기존 `PromptCacheState`(직전 턴 KV 재사용) / `VisionFeatureCache`(이미지 재인코딩 방지)와 **병행 동작**
 
-> 본 프로젝트에서 TTFT 개선폭은 아직 실측하지 않았습니다. 위 설명은 mlx-vlm의 설계 동작 기준입니다.
+### ⚠️ Qwen3.6-27B에서의 실측 결과 (2026-08-02, M5 Pro 64GB)
 
-### 기본값: ON
+**이 모델에서는 APC 이득이 확인되지 않았습니다.** 기본값은 ON이되 **메모리 전용**입니다.
+
+- Qwen3.6-27B는 hybrid 구조(`linear_attention` + `full_attention`)라 recurrent state를
+  K/V 블록 concat으로 복원할 수 없습니다. `model_apc_mode()`가 `"block"`이 아닌
+  **`"exact"`(전체 프롬프트 스냅샷)** 모드를 선택합니다.
+- 직전 캐시를 축출시킨 뒤 동일 프리픽스를 재요청하는 실험에서 **히트 0회**
+  (A 4.83s → C 4.57s, 사실상 콜드와 동일). 디스크만 1.4GB 소모했습니다.
+- `dispatch.py`는 `reused_prefix_len == 0`일 때만 APC를 조회합니다. 즉 `PromptCacheState`가
+  **몇 토큰짜리 사소한 매치**만 잡아도 APC 조회가 통째로 스킵됩니다.
+
+체감 속도 향상(TTFT 12.27s → 0.44s)은 APC가 아니라 **기존 `PromptCacheState`**가 내고 있습니다.
+openclaw 같은 순차 대화 패턴은 이미 이쪽에서 커버됩니다.
+
+block 모드를 지원하는 모델(non-hybrid)로 바꾸면 APC가 의미 있어질 수 있습니다.
+
+### 기본값: ON (메모리 전용)
 
 ```
-♻️  APC: ON (prefix caching, disk: /path/to/local-llm/.apc-cache, 상한 20GB)
+♻️  APC: ON (prefix caching, 메모리 전용)
 ```
 
-### 비활성화 / 경로 변경
+### 비활성화 / 디스크 영속
 
 ```bash
 ./llm-server.sh --no-apc                             # 끄기
-python llm-api-server.py --apc-dir /path/to/cache    # 경로 지정
-python llm-api-server.py --apc-dir ""                # 메모리 전용 (디스크 미사용)
+python llm-api-server.py --apc-dir .apc-cache        # 디스크 영속 활성화
 python llm-api-server.py --apc-max-gb 50             # 디스크 상한 변경 (0이면 무제한)
 ```
 
-`llm-server.sh`는 항상 `.apc-cache/`를 디스크 경로로 넘깁니다. 메모리 전용으로 쓰려면
+`llm-server.sh`는 `--apc-dir`를 넘기지 않습니다(= 메모리 전용). 디스크 영속이 필요하면
 `llm-api-server.py`를 직접 실행하세요.
 
 ### 알려진 제약
@@ -550,6 +562,23 @@ Qwen3.6-27B는 Thinking 기본 OFF (DEFAULT_THINKING=False). 요청 시 enable_t
 > temperature가 무시되고 항상 0.0(greedy)으로 동작**했습니다. 이제 정상 반영됩니다.
 > 미지정 시 OpenAI 기본값인 **1.0**이 적용되므로, 이전과 같은 결정적 출력을 원하면
 > 요청에 `"temperature": 0.0`을 명시하세요.
+>
+> 실측 확인 (Qwen3.6-27B): `0.0` → `"Purple elephants dance on moonlight."`,
+> `2.0` → 출력 붕괴(토큰 반복). temperature가 샘플러까지 도달함을 확인했습니다.
+> 다만 **동일 요청을 반복하면 매번 같은 출력**이 나옵니다(run-to-run 랜덤성 없음).
+> 이는 별개 사안이며, 변화가 필요하면 요청에 `seed`를 다르게 지정하세요.
+
+### 지원하는 샘플링 파라미터
+
+| 파라미터 | 전달 여부 | 비고 |
+|---|:-:|---|
+| `temperature` | ✅ | 기본 1.0 |
+| `top_p` | ✅ | 기본 1.0 |
+| `seed` | ✅ | 미지정 시 None |
+| `repetition_penalty` | ✅ | 미지정 시 None |
+| `presence_penalty` | ✅ | 0이면 None으로 변환 |
+| `frequency_penalty` | ✅ | 0이면 None으로 변환 |
+| `stop` | ❌ | 파싱은 되나 미전달 — mlx-vlm의 `eos_tokens` 처리가 `generate()`에만 있고 `stream_generate()`에는 없어 스트리밍/비스트리밍 동작이 갈림 |
 
 ### Max Tokens
 
