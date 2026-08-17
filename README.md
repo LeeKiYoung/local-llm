@@ -386,10 +386,12 @@ thinking 시간만큼 늦게 보인다 (멈춘 게 아님). 참고: pi-ai는 rea
 `developer` role을 보내는데 서버가 `system`으로 자동 매핑한다.
 
 ```bash
-npm install -g @deepseek-ai/dsh
+npm install -g @deepseek-ai/dsh    # setup.sh에서 선택 설치도 지원
 LOCAL_LLM_API_KEY=local dsh --profile headless "현재 디렉토리 파일 개수 알려줘"  # 단발 실행
-LOCAL_LLM_API_KEY=local dsh web                                                # 웹 UI (127.0.0.1:3080)
 ```
+
+dsh가 설치돼 있으면 `./llm-server.sh`가 웹 UI(http://127.0.0.1:3080)를 자동으로 함께
+띄우고, 서버를 Ctrl+C로 끄면 같이 종료된다 (`--no-dsh`로 비활성화).
 
 #### 웹 UI 연동
 
