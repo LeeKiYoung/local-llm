@@ -160,6 +160,30 @@ class TestCacheTrimBugRetry:
         assert list(server_module.run_inference_streaming({})) == ["a", "b"]
 
 
+class TestStripThinkingWithToolCall:
+    def test_thinking_on_direct_tool_call_kept(self):
+        # thinking ON인데 모델이 <think> 없이 바로 tool call → 원문 유지
+        text = "<tool_call>\n<function=f>\n</function>\n</tool_call>"
+        assert server_module.strip_thinking(text, enable_thinking=True) == text
+
+    def test_thinking_on_truncated_still_hidden(self):
+        # 잘린 thinking (tool_call 없음)은 기존대로 숨김
+        assert server_module.strip_thinking("생각 중인 내용...", enable_thinking=True) == ""
+
+    def test_thinking_block_then_tool_call(self):
+        text = "고민...</think>\n<tool_call>X</tool_call>"
+        assert server_module.strip_thinking(text, enable_thinking=True) == "<tool_call>X</tool_call>"
+
+
+class TestDeveloperRole:
+    def test_developer_role_mapped_to_system(self):
+        out = server_module.normalize_messages([
+            {"role": "developer", "content": "지시문"},
+            {"role": "user", "content": "질문"},
+        ])
+        assert [m["role"] for m in out] == ["system", "user"]
+
+
 class TestParseRequestTools:
     def test_tools_passthrough(self):
         params = parse_request({"tools": [WEATHER_TOOL]})

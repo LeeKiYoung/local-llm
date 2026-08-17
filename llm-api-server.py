@@ -734,6 +734,11 @@ def normalize_messages(messages):
     for msg in messages:
         m = {**msg}
 
+        # developer role → system (OpenAI 신규 role — pi-ai 등이 reasoning 모델에 사용,
+        # Qwen 템플릿은 developer를 거부하므로 system으로 매핑)
+        if m.get("role") == "developer":
+            m["role"] = "system"
+
         # content: 배열 → 문자열 (멀티모달 포맷)
         # image_url 파트는 extract_images()가 원본 messages에서 직접 읽으므로
         # 여기서 제거하지 않는다 — normalize 이전에 extract_images() 호출 필요
@@ -833,6 +838,10 @@ def strip_thinking(text, enable_thinking=False):
     if "</think>" in text:
         return text.split("</think>", 1)[1].strip()
     if enable_thinking:
+        # enable_thinking=True + tools일 때 Qwen3.8은 <think> 없이 바로 <tool_call>을
+        # 내뱉기도 함 — 이 경우 잘린 thinking이 아니므로 원문 유지 (tool_calls 파싱 필요)
+        if "<tool_call>" in text:
+            return text.strip()
         # enable_thinking=True인데 </think> 없음 → max_tokens 초과로 잘린 것
         # thinking 내용 노출 방지 (finish_reason=length로 클라이언트가 인지, issue #14)
         return ""
@@ -1013,9 +1022,9 @@ def _run_inference_inner(params):
         model.config,
         messages,
         num_images=len(images),
-        chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
-        # tools는 top-level kwarg로 넘겨야 HF apply_chat_template의 tools 파라미터에 도달
-        # (chat_template_kwargs 안에 넣으면 스키마 렌더링 안 됨 — 오프라인 렌더링 실측 확인)
+        # enable_thinking/tools 모두 top-level kwarg — chat_template_kwargs={...} 중첩은
+        # Qwen3.8 템플릿에서 조용히 무시됨 (thinking 항상 OFF, 오프라인 렌더링 실측 확인)
+        enable_thinking=params["enable_thinking"],
         **({"tools": params["tools"]} if params.get("tools") else {}),
     )
 
@@ -1099,7 +1108,8 @@ def _run_inference_streaming_inner(params):
         model.config,
         messages,
         num_images=len(images),
-        chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
+        # top-level kwarg — chat_template_kwargs 중첩은 무시됨 (비스트리밍 쪽 주석 참조)
+        enable_thinking=params["enable_thinking"],
         **({"tools": params["tools"]} if params.get("tools") else {}),
     )
 
@@ -1343,6 +1353,14 @@ def _stream_response(req_id, params, ip, start, last_msg):
                             after = _tool_gate(think_buf.split("</think>", 1)[1])
                             if after:
                                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': after}))}\n\n"
+                        elif tool_mode and "<tool_call>" in think_buf:
+                            # thinking 없이 바로 tool call로 간 경우 (strip_thinking 주석 참조)
+                            # — think 버퍼를 tool 게이트로 이관
+                            thinking_done = True
+                            emit = _tool_gate(think_buf)
+                            think_buf = ""
+                            if emit:
+                                yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': emit}))}\n\n"
 
                 # </think>가 끝내 안 나온 경우:
                 # - enable_thinking=False: thinking 없는 정상 응답 → 버퍼 전체 yield

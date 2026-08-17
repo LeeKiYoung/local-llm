@@ -165,8 +165,8 @@ class TestChatCompletions:
         # apply_chat_template은 모듈 레벨 함수: apply_chat_template(processor, config, messages, num_images, chat_template_kwargs)
         assert server_module.apply_chat_template.called
         call_args = server_module.apply_chat_template.call_args
-        # chat_template_kwargs 파라미터 (keyword 인자)
-        template_kwargs = call_args.kwargs.get("chat_template_kwargs", {})
+        # enable_thinking은 top-level kwarg (chat_template_kwargs 중첩은 Qwen3.8 템플릿에서 무시됨)
+        template_kwargs = call_args.kwargs
         assert template_kwargs.get("enable_thinking") is True
 
     def test_enable_thinking_default_false(self, client):
@@ -178,7 +178,7 @@ class TestChatCompletions:
         # DEFAULT_THINKING=False이면 enable_thinking=False가 chat_template_kwargs로 전달됨
         assert server_module.apply_chat_template.called
         call_args = server_module.apply_chat_template.call_args
-        template_kwargs = call_args.kwargs.get("chat_template_kwargs", {})
+        template_kwargs = call_args.kwargs
         # enable_thinking이 False로 전달되거나 absent
         assert not template_kwargs.get("enable_thinking", False)
 
@@ -251,7 +251,7 @@ class TestStreaming:
         assert resp.status_code == 200
         assert server_module.apply_chat_template.called
         call_args = server_module.apply_chat_template.call_args
-        template_kwargs = call_args.kwargs.get("chat_template_kwargs", {})
+        template_kwargs = call_args.kwargs
         assert template_kwargs.get("enable_thinking") is True
 
 
