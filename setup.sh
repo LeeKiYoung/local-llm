@@ -122,13 +122,14 @@ else
   echo "✅ 가상환경 생성 완료"
 fi
 
-# 6. mlx-vlm 설치 (PyPI 고정 버전 — 0.6.5부터 APC(prefix caching), 0.6.8에 Qwen MRoPE 위치 수정 포함)
+# 6. mlx-vlm 설치 (PyPI 고정 버전 — 0.6.5부터 APC(prefix caching), 0.6.8에 Qwen MRoPE 위치 수정,
+#    0.6.12에 Qwen3.5 계열 디코드/structured output 수정, 0.6.13에 APC prefix 재사용·스트림 버퍼 수정 포함)
 echo ""
-echo "📦 mlx-vlm 설치 중 (0.6.8)..."
+echo "📦 mlx-vlm 설치 중 (0.6.13)..."
 "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
 # transformers도 고정 — 채팅 템플릿(enable_thinking, <think> prefix 주입) 동작이
 # strip_thinking() 로직과 결합돼 있어 버전이 흔들리면 조용히 깨진다
-"$SCRIPT_DIR/.venv/bin/pip" install "mlx-vlm==0.6.8" "mlx==0.32.0" "transformers==5.14.1" -q
+"$SCRIPT_DIR/.venv/bin/pip" install "mlx-vlm==0.6.13" "mlx==0.32.0" "transformers==5.14.1" -q
 echo "✅ mlx-vlm 설치 완료"
 
 echo "📦 FastAPI + uvicorn 설치 중..."
