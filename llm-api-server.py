@@ -723,6 +723,8 @@ def parse_request(data: dict) -> dict:
         "frequency_penalty": data.get("frequency_penalty", 0),
         "enable_thinking": data.get("enable_thinking", DEFAULT_THINKING),
         "preserve_thinking": data.get("preserve_thinking", False),
+        # tool_choice="none"이면 tools를 아예 템플릿에 넣지 않는다 (호출 억제)
+        "tools": None if data.get("tool_choice") == "none" else data.get("tools"),
     }
 
 
@@ -838,6 +840,58 @@ def strip_thinking(text, enable_thinking=False):
     return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
 
 
+def parse_tool_calls(text, tools=None):
+    """모델 출력의 <tool_call> XML 블록을 OpenAI tool_calls로 파싱.
+
+    Qwen3.8 템플릿은 Hermes JSON이 아닌 XML 스타일을 지시한다:
+      <tool_call><function=NAME><parameter=KEY>value</parameter>...</function></tool_call>
+    parameter 값은 raw 문자열 — tools 스키마에서 type이 string이 아닌 파라미터만
+    json.loads로 캐스팅한다 (Qwen3-Coder 계열 파서와 동일한 방식).
+
+    Returns: (content 또는 None, tool_calls 리스트) — tool_call 블록이 없으면 (text, [])
+    """
+    import re
+    if "<tool_call>" not in text:
+        return text, []
+
+    # 스키마: {함수명: {파라미터명: type}} — 캐스팅 판단용
+    schema = {}
+    for t in tools or []:
+        fn = t.get("function", {})
+        props = fn.get("parameters", {}).get("properties", {})
+        schema[fn.get("name", "")] = {k: v.get("type", "string") for k, v in props.items()}
+
+    tool_calls = []
+    for block in re.findall(r"<tool_call>(.*?)</tool_call>", text, flags=re.DOTALL):
+        m = re.search(r"<function=([^>]+)>(.*?)</function>", block, flags=re.DOTALL)
+        if not m:
+            continue
+        name = m.group(1).strip()
+        args = {}
+        for pk, pv in re.findall(r"<parameter=([^>]+)>\n?(.*?)\n?</parameter>", m.group(2), flags=re.DOTALL):
+            pk = pk.strip()
+            if schema.get(name, {}).get(pk, "string") != "string":
+                try:
+                    pv = json.loads(pv)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            args[pk] = pv
+        tool_calls.append({
+            "id": f"call_{uuid.uuid4().hex[:24]}",
+            "type": "function",
+            "function": {
+                "name": name,
+                # OpenAI 포맷은 arguments가 JSON "문자열" — dict로 주면 클라이언트가 조용히 깨짐
+                "arguments": json.dumps(args, ensure_ascii=False),
+            },
+        })
+
+    if not tool_calls:
+        return text, []
+    content = text.split("<tool_call>", 1)[0].strip()
+    return content or None, tool_calls
+
+
 def _warn_large_prefill(messages):
     """메시지 전체 문자 수 기준으로 대형 프리필 위험을 콘솔에 경고한다.
 
@@ -856,7 +910,10 @@ def _warn_large_prefill(messages):
 
 
 # ── 응답 생성 ─────────────────────────────────────
-def make_completion_response(req_id, model_name, content, finish_reason, prompt_tokens, completion_tokens):
+def make_completion_response(req_id, model_name, content, finish_reason, prompt_tokens, completion_tokens, tool_calls=None):
+    message = {"role": "assistant", "content": content}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
     return {
         "id": req_id,
         "object": "chat.completion",
@@ -864,7 +921,7 @@ def make_completion_response(req_id, model_name, content, finish_reason, prompt_
         "model": model_name,
         "choices": [{
             "index": 0,
-            "message": {"role": "assistant", "content": content},
+            "message": message,
             "finish_reason": finish_reason,
         }],
         "usage": {
@@ -919,8 +976,26 @@ def _sampling_kwargs(params):
     }
 
 
+def _is_cache_trim_bug(e):
+    """mlx-vlm 0.6.13 업스트림 버그: prefix 분기 시 MTP draft의 ArraysCache에 없는
+    trim()을 호출해 AttributeError 발생. 캐시를 버리고 콜드 프리필하면 정상 동작."""
+    return isinstance(e, AttributeError) and "trim" in str(e)
+
+
+def _reset_prompt_cache():
+    prompt_cache_state.cache = None
+    prompt_cache_state.token_ids = None
+    mx.clear_cache()
+
+
 def run_inference(params):
-    return _run_inference_inner(params)
+    try:
+        return _run_inference_inner(params)
+    except AttributeError as e:
+        if not _is_cache_trim_bug(e):
+            raise
+        _reset_prompt_cache()
+        return _run_inference_inner(params)
 
 
 def _run_inference_inner(params):
@@ -938,6 +1013,9 @@ def _run_inference_inner(params):
         messages,
         num_images=len(images),
         chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
+        # tools는 top-level kwarg로 넘겨야 HF apply_chat_template의 tools 파라미터에 도달
+        # (chat_template_kwargs 안에 넣으면 스키마 렌더링 안 됨 — 오프라인 렌더링 실측 확인)
+        **({"tools": params["tools"]} if params.get("tools") else {}),
     )
 
     # 추론 전 Metal 동기화: inflight 커맨드 버퍼가 모두 완료될 때까지 대기.
@@ -990,7 +1068,20 @@ def _run_inference_inner(params):
 
 
 def run_inference_streaming(params):
-    yield from _run_inference_streaming_inner(params)
+    gen = _run_inference_streaming_inner(params)
+    try:
+        first = next(gen)
+    except StopIteration:
+        return
+    except AttributeError as e:
+        # trim 버그는 첫 토큰 생성 전(prefill 단계)에만 발생 — 캐시 리셋 후 재시도
+        if not _is_cache_trim_bug(e):
+            raise
+        _reset_prompt_cache()
+        yield from _run_inference_streaming_inner(params)
+        return
+    yield first
+    yield from gen
 
 
 def _run_inference_streaming_inner(params):
@@ -1007,6 +1098,7 @@ def _run_inference_streaming_inner(params):
         messages,
         num_images=len(images),
         chat_template_kwargs={"enable_thinking": params["enable_thinking"]},
+        **({"tools": params["tools"]} if params.get("tools") else {}),
     )
 
     # 추론 전 Metal 동기화 (clear_cache는 생략 — KV 캐시 보존 필요, Change 1 주석 참조)
@@ -1121,7 +1213,16 @@ async def chat_completions(request: Request):
         pending -= 1
 
     duration_ms = int((time.time() - start) * 1000)
-    resp = make_completion_response(req_id, params["model"], text, finish_reason, p_tokens, c_tokens)
+
+    tool_calls = []
+    if params.get("tools"):
+        text, tool_calls = parse_tool_calls(text, params["tools"])
+        if tool_calls:
+            finish_reason = "tool_calls"
+    resp = make_completion_response(
+        req_id, params["model"], text, finish_reason, p_tokens, c_tokens,
+        tool_calls=tool_calls or None,
+    )
 
     log_entry({
         "timestamp": datetime.now().isoformat(),
@@ -1132,7 +1233,9 @@ async def chat_completions(request: Request):
         "prompt_preview": last_msg,
         "usage": resp["usage"],
         "finish_reason": finish_reason,
-        "content_preview": text[:200],
+        # 순수 tool call 응답은 content가 None (OpenAI 포맷)
+        "content_preview": (text or "")[:200],
+        **({"tool_calls": [tc["function"]["name"] for tc in tool_calls]} if tool_calls else {}),
     })
 
     return resp
@@ -1177,6 +1280,37 @@ def _stream_response(req_id, params, ip, start, last_msg):
                 think_buf = ""
                 thinking_done = bool(params.get("preserve_thinking"))
 
+                # tools 요청 시: <tool_call>이 시작될 수 있는 꼬리를 보류 (청크 경계 대응,
+                # think_buf와 같은 패턴). 태그 확정되면 이후 텍스트는 스트림에 내보내지 않고
+                # 스트림 끝에 tool_calls delta 한 번으로 내보낸다.
+                tool_mode = bool(params.get("tools"))
+                tool_buf = ""
+                tool_capturing = False
+                _TC_TAG = "<tool_call>"
+
+                def _tool_gate(chunk_text):
+                    """content로 안전하게 내보낼 수 있는 부분만 반환"""
+                    nonlocal tool_buf, tool_capturing
+                    if not tool_mode:
+                        return chunk_text
+                    if tool_capturing:
+                        return ""
+                    tool_buf += chunk_text
+                    idx = tool_buf.find(_TC_TAG)
+                    if idx != -1:
+                        tool_capturing = True
+                        out, tool_buf = tool_buf[:idx], ""
+                        return out
+                    # 버퍼 꼬리가 태그의 prefix일 수 있으면 그만큼 보류
+                    hold = 0
+                    for n in range(min(len(_TC_TAG) - 1, len(tool_buf)), 0, -1):
+                        if _TC_TAG.startswith(tool_buf[-n:]):
+                            hold = n
+                            break
+                    out = tool_buf[:len(tool_buf) - hold] if hold else tool_buf
+                    tool_buf = tool_buf[len(tool_buf) - hold:] if hold else ""
+                    return out
+
                 while True:
                     item = await queue.get()
                     if isinstance(item, Exception):
@@ -1195,14 +1329,16 @@ def _stream_response(req_id, params, ip, start, last_msg):
                         finish_reason = "length"
 
                     if thinking_done:
-                        yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': item.text}))}\n\n"
+                        emit = _tool_gate(item.text)
+                        if emit:
+                            yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': emit}))}\n\n"
                     else:
                         # Qwen3.6-27B: chat template이 <think>를 prefix로 주입하므로
                         # 생성 텍스트에는 </think>만 나옴 — 청크 경계 걸쳐도 buf 누적으로 처리
                         think_buf += item.text
                         if "</think>" in think_buf:
                             thinking_done = True
-                            after = think_buf.split("</think>", 1)[1]
+                            after = _tool_gate(think_buf.split("</think>", 1)[1])
                             if after:
                                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': after}))}\n\n"
 
@@ -1210,9 +1346,22 @@ def _stream_response(req_id, params, ip, start, last_msg):
                 # - enable_thinking=False: thinking 없는 정상 응답 → 버퍼 전체 yield
                 # - enable_thinking=True: max_tokens 초과로 잘린 것 → thinking 내용 노출 방지 (issue #14)
                 if not thinking_done and think_buf and not params.get("enable_thinking"):
-                    yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': think_buf}))}\n\n"
+                    emit = _tool_gate(think_buf)
+                    if emit:
+                        yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': emit}))}\n\n"
 
                 full_text = strip_thinking(full_text, enable_thinking=params.get("enable_thinking", False))
+
+                # tool_calls: 스트림 끝에 한 번에 delta로 내보냄 (버퍼링 방식 — 클라이언트 호환 OK)
+                if tool_mode:
+                    _, tool_calls = parse_tool_calls(full_text, params["tools"])
+                    if tool_calls:
+                        finish_reason = "tool_calls"
+                        deltas = [{**tc, "index": i} for i, tc in enumerate(tool_calls)]
+                        yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'tool_calls': deltas}))}\n\n"
+                    elif tool_buf and not tool_capturing:
+                        # 보류했던 꼬리가 tool_call이 아니었음 → content로 flush
+                        yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': tool_buf}))}\n\n"
 
                 # 최종 청크
                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {}, finish_reason))}\n\n"
