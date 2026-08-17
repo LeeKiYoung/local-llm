@@ -15,6 +15,7 @@
 #   ./llm-server.sh supergemma4 --think  # SuperGemma4 + Thinking (모델이 지원하는 경우만)
 #   ./llm-server.sh --no-mtp     # MTP speculative decoding 비활성화
 #   ./llm-server.sh --no-apc     # APC prefix caching 비활성화
+#   ./llm-server.sh --no-dsh     # dsh 웹 UI 자동 실행 안 함
 #
 # Thinking 제어:
 #   기본 Thinking OFF. --think 옵션으로 기본 ON.
@@ -35,6 +36,7 @@ PORT=8080
 USE_THINK=false
 NO_MTP=false
 NO_APC=false
+NO_DSH=false
 
 switch_profile() {
   if [ -z "$MODEL_CONFIG" ]; then
@@ -136,6 +138,9 @@ for arg in "$@"; do
     --no-apc)
       NO_APC=true
       ;;
+    --no-dsh)
+      NO_DSH=true
+      ;;
     *)
       if [[ "$arg" =~ ^[0-9]+$ ]]; then
         PORT="$arg"
@@ -194,8 +199,20 @@ else
   echo "   ♻️  APC: OFF"
 fi
 echo "   📝 로깅: ON (logs/ 폴더에 저장)"
+
+# dsh 웹 UI 자동 실행 (설치돼 있으면) — API 서버 종료 시 함께 종료
+DSH_PID=""
+if [ "$NO_DSH" = false ] && command -v dsh >/dev/null 2>&1; then
+  mkdir -p "$SCRIPT_DIR/logs"
+  LOCAL_LLM_API_KEY=local dsh web > "$SCRIPT_DIR/logs/dsh-web.log" 2>&1 &
+  DSH_PID=$!
+  echo "   🤖 dsh 웹 UI: http://127.0.0.1:3080 (에이전트 질문창, 서버와 함께 종료)"
+fi
+
 echo "   종료: Ctrl+C"
 echo "   💤 덮개 닫아도 서버 유지됩니다 (caffeinate -dis, 전원 연결 필요)"
 echo ""
 
-exec caffeinate -dis "$VENV/python" "$SCRIPT_DIR/llm-api-server.py" "${SERVER_ARGS[@]}"
+# exec를 쓰면 trap이 실행되지 않아 dsh가 고아 프로세스로 남는다 — 일반 실행 + trap으로 정리
+trap '[ -n "$DSH_PID" ] && kill "$DSH_PID" 2>/dev/null' EXIT
+caffeinate -dis "$VENV/python" "$SCRIPT_DIR/llm-api-server.py" "${SERVER_ARGS[@]}"

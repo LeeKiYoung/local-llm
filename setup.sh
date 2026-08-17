@@ -181,7 +181,19 @@ snapshot_download(repo_id='$MODEL', ignore_patterns=['*.bin', '*.pt'])
   echo "✅ 모델 다운로드 완료"
 fi
 
-# 10. 완료
+# 10. dsh (deepseek-harness) 에이전트 웹 UI — 선택 설치
+if command -v dsh >/dev/null 2>&1; then
+  echo "✅ dsh 이미 설치됨 ($(dsh --version 2>/dev/null))"
+elif command -v npm >/dev/null 2>&1; then
+  read -p "dsh 에이전트 웹 UI를 설치할까요? (llm-server.sh가 자동 실행해줌) [Y/n] " REPLY
+  if [[ ! "$REPLY" =~ ^[Nn]$ ]]; then
+    npm install -g @deepseek-ai/dsh && echo "✅ dsh 설치 완료 — 서버 시작 시 http://127.0.0.1:3080 자동 실행"
+  fi
+else
+  echo "ℹ️  dsh 웹 UI를 쓰려면 Node.js 설치 후: npm install -g @deepseek-ai/dsh"
+fi
+
+# 11. 완료
 echo ""
 echo "============================================"
 echo "  셋업 완료! — $MODEL_NAME"
