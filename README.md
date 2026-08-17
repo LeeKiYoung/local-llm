@@ -285,6 +285,9 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
+> 원격 `http(s)` image_url은 기본 비활성 (SSRF 방지) — `data:image/...;base64`만 허용.
+> 원격 URL이 필요하면 서버를 `--allow-remote-images`로 실행.
+
 #### 요청별 Thinking 제어
 
 ```bash

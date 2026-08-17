@@ -764,6 +764,9 @@ def normalize_messages(messages):
 
 ALLOWED_URL_SCHEMES = ("http://", "https://")
 MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20MB raw bytes 상한 (압축 폭탄 방지)
+# SSRF 방지 (#20): 원격 image_url은 기본 비활성 — data: base64만 허용.
+# --allow-remote-images 플래그로 opt-in.
+ALLOW_REMOTE_IMAGES = False
 
 
 def extract_images(messages):
@@ -786,7 +789,11 @@ def extract_images(messages):
                         raise ValueError("이미지 크기 초과 (최대 20MB)")
                     img = Image.open(io.BytesIO(decoded))
                 elif url.startswith(ALLOWED_URL_SCHEMES):
-                    # HTTP/HTTPS URL만 허용 (SSRF 방지 — file://, ftp://, 내부 IP 등 차단)
+                    if not ALLOW_REMOTE_IMAGES:
+                        raise ValueError(
+                            "원격 image_url은 비활성 상태 (SSRF 방지). "
+                            "data:image/...;base64 형식을 사용하거나 서버를 --allow-remote-images로 실행하세요"
+                        )
                     import urllib.request
                     with urllib.request.urlopen(url, timeout=10) as resp:
                         raw = resp.read(MAX_IMAGE_BYTES + 1)
@@ -1237,7 +1244,7 @@ def _stream_response(req_id, params, ip, start, last_msg):
 # ── 메인 ─────────────────────────────────────────
 def main():
     global model_id, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING, DRAFT_KIND, DRAFT_BLOCK_SIZE, _MTP_SUPPORTED
-    global APC_ENABLED, APC_DIR, APC_MAX_GB
+    global APC_ENABLED, APC_DIR, APC_MAX_GB, ALLOW_REMOTE_IMAGES
 
     parser = argparse.ArgumentParser(description="Local LLM API Server")
     parser.add_argument("--model", type=str, default="mlx-community/Qwen3.6-27B-6bit")
@@ -1258,6 +1265,8 @@ def main():
                         help="APC 블록 디스크 영속 경로 (미지정 시 메모리 전용)")
     parser.add_argument("--apc-max-gb", type=float, default=20.0,
                         help="APC 디스크 캐시 상한 GB (기본값: 20, 0이면 무제한)")
+    parser.add_argument("--allow-remote-images", action="store_true", default=False,
+                        help="원격 http(s) image_url 다운로드 허용 (기본 비활성 — SSRF 방지)")
     args = parser.parse_args()
 
     model_id = args.model
@@ -1268,6 +1277,7 @@ def main():
     APC_ENABLED = not args.no_apc
     APC_DIR = args.apc_dir
     APC_MAX_GB = args.apc_max_gb
+    ALLOW_REMOTE_IMAGES = args.allow_remote_images
     LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
     os.makedirs(LOG_DIR, exist_ok=True)
     if APC_ENABLED and APC_DIR:

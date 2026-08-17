@@ -333,8 +333,16 @@ class TestExtractImages:
         # 결과 목록에 이미지가 1개 들어 있다
         assert len(result) == 1
 
+    def test_url_image_blocked_by_default(self):
+        """#20: 원격 image_url은 기본 비활성 — ValueError로 거부된다 (SSRF 방지)"""
+        messages = [
+            {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "http://127.0.0.1/x.png"}}]}
+        ]
+        with pytest.raises(ValueError, match="원격 image_url"):
+            _REAL_EXTRACT_IMAGES(messages)
+
     def test_url_image_downloaded(self):
-        """CORE-02: HTTP URL 이미지가 urllib.request로 다운로드되어 PIL Image로 변환된다"""
+        """CORE-02: --allow-remote-images 활성 시 HTTP URL 이미지가 다운로드되어 PIL Image로 변환된다"""
         fake_img = MagicMock()
         fake_img.convert.return_value = fake_img
         server_module.Image.open.return_value = fake_img
@@ -352,7 +360,8 @@ class TestExtractImages:
             {"role": "user", "content": [{"type": "image_url", "image_url": {"url": url}}]}
         ]
 
-        with patch("urllib.request.urlopen", return_value=fake_resp):
+        with patch("urllib.request.urlopen", return_value=fake_resp), \
+             patch.object(server_module, "ALLOW_REMOTE_IMAGES", True):
             result = _REAL_EXTRACT_IMAGES(messages)
 
         # Image.open이 호출되어 다운로드된 바이트를 처리했다
