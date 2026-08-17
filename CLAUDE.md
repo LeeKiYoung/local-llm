@@ -15,6 +15,12 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - **플랫폼**: Apple Silicon 전용 (mlx, mlx-vlm 모두 Apple Silicon 필수)
 <!-- GSD:project-end -->
 
+## README 이중 언어 규칙
+
+- `README.md`(영어, 기본)와 `README.ko.md`(한국어)는 항상 동기화 상태를 유지한다.
+- README 내용을 수정할 때는 반드시 **두 파일 모두** 같은 변경을 반영할 것.
+- 상단의 언어 전환 링크(`한국어 | English`)는 양쪽 파일에서 유지한다.
+
 <!-- GSD:stack-start source:codebase/STACK.md -->
 ## Technology Stack
 
