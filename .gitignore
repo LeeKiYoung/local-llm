@@ -7,3 +7,8 @@ tailscale-guide.md
 logs/
 .planning/
 .apc-cache/
+
+# 로컬 툴/부산물
+.coverage
+.claude/
+.claudeignore
