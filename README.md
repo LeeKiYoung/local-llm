@@ -1051,7 +1051,7 @@ llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # 두
 - [MLX-VLM GitHub](https://github.com/Blaizzy/mlx-vlm)
 - [Qwen3.8-27B-8bit (MLX Community)](https://huggingface.co/mlx-community/Qwen3.8-27B-8bit)
 - [Qwen3.8 공식 HuggingFace](https://huggingface.co/Qwen/Qwen3.8-27B)
-- [dsh (deepseek-harness) GitHub](https://github.com/deepseek-ai/dsh)
+- [dsh (deepseek-harness) GitHub](https://github.com/deepseek-ai/deepseek-harness)
 - [Qwen3.6-27B-6bit (MLX Community)](https://huggingface.co/mlx-community/Qwen3.6-27B-6bit)
 - [Qwen3.6 공식 HuggingFace](https://huggingface.co/Qwen/Qwen3.6-27B)
 - [SuperGemma4 26B uncensored MLX 4bit (v2)](https://huggingface.co/Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2)
