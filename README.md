@@ -327,6 +327,58 @@ curl http://localhost:8080/v1/chat/completions \
 | `repetition_penalty` | float | null | 반복 패널티 (파싱됨, 현재 모델에 전달되지 않음) |
 | `enable_thinking` | bool | false | Thinking 모드 (기본 OFF, 요청별 ON 가능, Qwen3.6-27B 지원) |
 | `preserve_thinking` | bool | false | true 시 thinking 텍스트 그대로 포함, false 시 `</think>` 이후 답변만 반환 |
+| `tools` | array | null | OpenAI function calling 스키마 — 채팅 템플릿에 전달됨 |
+| `tool_choice` | string | null | `"none"`이면 tools 무시 (그 외 값은 미지원) |
+
+#### Tool Calling (Function Calling)
+
+OpenAI 호환 tool calling을 지원한다 (2026-08-18, 스트리밍 포함). 모델이 함수를 호출하면
+`finish_reason: "tool_calls"`와 함께 OpenAI 포맷 `tool_calls`가 반환된다
+(`arguments`는 JSON 문자열). 스트리밍에서는 `<tool_call>` 감지 시 content 출력을 멈추고
+스트림 끝에 tool_calls delta 청크 한 번으로 내보낸다.
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -d '{"messages":[{"role":"user","content":"서울 날씨 알려줘"}],
+       "tools":[{"type":"function","function":{"name":"get_weather",
+         "parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}'
+# → {"finish_reason":"tool_calls","message":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\": \"서울\"}"}}]}}
+```
+
+tool 결과는 표준 OpenAI 방식(`role: "tool"` + `tool_call_id`)으로 회신하면 된다.
+참고: Qwen3.8 채팅 템플릿은 XML 스타일(`<function=...><parameter=...>`) tool call 포맷을
+쓰며, 서버가 이를 OpenAI 포맷으로 변환한다.
+
+#### 에이전트 하네스 연동 (deepseek-harness / dsh)
+
+tool calling 덕분에 [dsh](https://github.com/deepseek-ai/dsh) 같은 에이전트 하네스를 바로 붙일 수 있다.
+`~/.dsh/settings.yaml`:
+
+```yaml
+llm-pi-ai:
+  providers:
+    local-mlx:
+      displayName: Local MLX
+      apiKeyEnv: LOCAL_LLM_API_KEY   # 로컬 서버는 인증 없음 — dummy 값이면 됨
+      api: openai-completions
+      baseURL: http://localhost:8080/v1
+      defaultInput: [text, image]
+      defaultContextWindow: 262144
+      defaultMaxTokens: 8192
+      models:
+        - id: mlx-community/Qwen3.8-27B-8bit
+          name: Qwen3.8 27B (local MLX)
+
+agent-default-model:
+  provider: local-mlx
+  model: mlx-community/Qwen3.8-27B-8bit
+```
+
+```bash
+npm install -g @deepseek-ai/dsh
+LOCAL_LLM_API_KEY=local dsh --profile headless "현재 디렉토리 파일 개수 알려줘"  # 단발 실행
+LOCAL_LLM_API_KEY=local dsh web                                                # 웹 UI (127.0.0.1:3080)
+```
 
 #### 웹 UI 연동
 
