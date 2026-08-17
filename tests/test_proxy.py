@@ -147,7 +147,7 @@ if __name__ == "__main__":
 
     # llm-proxy의 LOG_DIR을 테스트용으로 변경
     import importlib.util
-    spec = importlib.util.spec_from_file_location("llm_proxy", os.path.join(os.path.dirname(__file__), "llm-proxy.py"))
+    spec = importlib.util.spec_from_file_location("llm_proxy", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "llm-proxy.py"))
     proxy_module = importlib.util.module_from_spec(spec)
 
     # LOG_DIR 패치
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     env["BACKEND_PORT"] = str(BACKEND_PORT)
     env["PROXY_PORT"] = str(PROXY_PORT)
     proxy_proc = subprocess.Popen(
-        [sys.executable, os.path.join(os.path.dirname(__file__), "llm-proxy.py")],
+        [sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "llm-proxy.py")],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
