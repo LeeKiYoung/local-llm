@@ -110,6 +110,56 @@ class TestParseToolCalls:
         assert json.loads(calls[0]["function"]["arguments"]) == {"x": "42"}
 
 
+class TestCacheTrimBugRetry:
+    """mlx-vlm ArraysCache.trim() 업스트림 버그 방어 경로"""
+
+    TRIM_ERR = AttributeError("'ArraysCache' object has no attribute 'trim'")
+
+    def _patch_cache(self, monkeypatch):
+        monkeypatch.setattr(server_module, "prompt_cache_state", MagicMock())
+        monkeypatch.setattr(server_module, "mx", MagicMock())
+
+    def test_non_streaming_retries_on_trim_bug(self, monkeypatch):
+        self._patch_cache(monkeypatch)
+        inner = MagicMock(side_effect=[self.TRIM_ERR, ("답변", "stop", 10, 5)])
+        monkeypatch.setattr(server_module, "_run_inference_inner", inner)
+        assert server_module.run_inference({}) == ("답변", "stop", 10, 5)
+        assert inner.call_count == 2
+
+    def test_non_streaming_other_attribute_error_propagates(self, monkeypatch):
+        self._patch_cache(monkeypatch)
+        err = AttributeError("something else")
+        monkeypatch.setattr(server_module, "_run_inference_inner", MagicMock(side_effect=err))
+        import pytest
+        with pytest.raises(AttributeError, match="something else"):
+            server_module.run_inference({})
+
+    def test_streaming_retries_before_first_yield(self, monkeypatch):
+        self._patch_cache(monkeypatch)
+        calls = {"n": 0}
+
+        def fake_inner(params):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise self.TRIM_ERR
+            yield "tok1"
+            yield "tok2"
+
+        monkeypatch.setattr(server_module, "_run_inference_streaming_inner", fake_inner)
+        assert list(server_module.run_inference_streaming({})) == ["tok1", "tok2"]
+        assert calls["n"] == 2
+
+    def test_streaming_passthrough_when_no_error(self, monkeypatch):
+        self._patch_cache(monkeypatch)
+
+        def fake_inner(params):
+            yield "a"
+            yield "b"
+
+        monkeypatch.setattr(server_module, "_run_inference_streaming_inner", fake_inner)
+        assert list(server_module.run_inference_streaming({})) == ["a", "b"]
+
+
 class TestParseRequestTools:
     def test_tools_passthrough(self):
         params = parse_request({"tools": [WEATHER_TOOL]})

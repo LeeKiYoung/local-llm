@@ -994,6 +994,7 @@ def run_inference(params):
     except AttributeError as e:
         if not _is_cache_trim_bug(e):
             raise
+        print("  [WARN] mlx-vlm ArraysCache.trim 버그 감지 — 캐시 리셋 후 재시도")
         _reset_prompt_cache()
         return _run_inference_inner(params)
 
@@ -1077,6 +1078,7 @@ def run_inference_streaming(params):
         # trim 버그는 첫 토큰 생성 전(prefill 단계)에만 발생 — 캐시 리셋 후 재시도
         if not _is_cache_trim_bug(e):
             raise
+        print("  [WARN] mlx-vlm ArraysCache.trim 버그 감지 — 캐시 리셋 후 재시도 (스트리밍)")
         _reset_prompt_cache()
         yield from _run_inference_streaming_inner(params)
         return
