@@ -1,0 +1,10 @@
+# 런타임 의존성 — source of truth (#24)
+# setup.sh가 이 파일을 설치한다. 버전 변경 시 실서버 로드/생성 검증 필수.
+mlx-vlm==0.6.13
+mlx==0.32.0
+transformers==5.14.1
+fastapi==0.135.2
+uvicorn==0.42.0
+Pillow==12.2.0
+torch==2.11.0
+torchvision==0.26.0

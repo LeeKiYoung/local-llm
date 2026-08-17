@@ -1,0 +1,4 @@
+# 테스트 의존성 — CI와 로컬 pytest 공용 (#24)
+httpx==0.28.1
+pytest==9.0.2
+pytest-cov==7.1.0

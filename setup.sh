@@ -122,27 +122,16 @@ else
   echo "✅ 가상환경 생성 완료"
 fi
 
-# 6. mlx-vlm 설치 (PyPI 고정 버전 — 0.6.5부터 APC(prefix caching), 0.6.8에 Qwen MRoPE 위치 수정,
-#    0.6.12에 Qwen3.5 계열 디코드/structured output 수정, 0.6.13에 APC prefix 재사용·스트림 버퍼 수정 포함)
+# 6. 런타임 의존성 설치 (requirements-runtime.txt가 source of truth — #24)
+#    mlx-vlm 고정: 0.6.5부터 APC(prefix caching), 0.6.8에 Qwen MRoPE 위치 수정,
+#    0.6.12에 Qwen3.5 계열 디코드/structured output 수정, 0.6.13에 APC prefix 재사용·스트림 버퍼 수정 포함.
+#    transformers 고정: 채팅 템플릿(enable_thinking, <think> prefix 주입) 동작이
+#    strip_thinking() 로직과 결합돼 있어 버전이 흔들리면 조용히 깨진다.
 echo ""
-echo "📦 mlx-vlm 설치 중 (0.6.13)..."
+echo "📦 런타임 의존성 설치 중 (requirements-runtime.txt)..."
 "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
-# transformers도 고정 — 채팅 템플릿(enable_thinking, <think> prefix 주입) 동작이
-# strip_thinking() 로직과 결합돼 있어 버전이 흔들리면 조용히 깨진다
-"$SCRIPT_DIR/.venv/bin/pip" install "mlx-vlm==0.6.13" "mlx==0.32.0" "transformers==5.14.1" -q
-echo "✅ mlx-vlm 설치 완료"
-
-echo "📦 FastAPI + uvicorn 설치 중..."
-"$SCRIPT_DIR/.venv/bin/pip" install fastapi uvicorn -q
-echo "✅ FastAPI + uvicorn 설치 완료"
-
-echo "📦 Pillow 설치 중 (이미지 처리)..."
-"$SCRIPT_DIR/.venv/bin/pip" install Pillow -q
-echo "✅ Pillow 설치 완료"
-
-echo "📦 torch + torchvision 설치 중 (transformers 의존성)..."
-"$SCRIPT_DIR/.venv/bin/pip" install torch torchvision -q
-echo "✅ torch + torchvision 설치 완료"
+"$SCRIPT_DIR/.venv/bin/pip" install -r "$SCRIPT_DIR/requirements-runtime.txt" -q
+echo "✅ 런타임 의존성 설치 완료"
 
 # 7. HuggingFace 캐시 경로 안내
 HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
