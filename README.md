@@ -368,11 +368,22 @@ llm-pi-ai:
       models:
         - id: mlx-community/Qwen3.8-27B-8bit
           name: Qwen3.8 27B (local MLX)
+          # thinking 제어: pi-ai의 qwen 다이얼렉트가 top-level enable_thinking을 전송
+          compat:
+            thinkingFormat: qwen
+          reasoningEfforts:
+            off:
+            high: high
 
 agent-default-model:
   provider: local-mlx
   model: mlx-community/Qwen3.8-27B-8bit
+  reasoningEffort: off   # off=thinking 없음(빠름), high=thinking ON(느리지만 정확)
 ```
+
+thinking ON일 땐 서버가 `</think>`까지 버퍼링 후 답변만 스트리밍하므로 첫 토큰이
+thinking 시간만큼 늦게 보인다 (멈춘 게 아님). 참고: pi-ai는 reasoning 모델에
+`developer` role을 보내는데 서버가 `system`으로 자동 매핑한다.
 
 ```bash
 npm install -g @deepseek-ai/dsh
