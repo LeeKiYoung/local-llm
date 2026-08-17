@@ -13,7 +13,8 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 
 | 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
-| **Qwen3.6-27B-6bit** (기본) | `./llm-server.sh` | ~23GB | ~12 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
+| **Qwen3.8-27B-8bit** (기본) | `./llm-server.sh` | ~30GB (피크 34GB) | ~9.8 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
+| **Qwen3.6-27B-6bit** (이전 기본) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ | 위와 동일 기능 — 메모리 32~48GB 환경용 |
 | **Qwen3.6-35B-A3B-8bit** (빠른 프로필) | `./llm-server.sh qwen36-fast` | ~37GB | 3~4배⁴ | MoE(활성 3B) 멀티모달. 대량·반복 작업용 — 품질은 27B dense가 우위 |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
 | **SuperGemma4-26B abliterated-multimodal** | `./llm-server.sh supergemma4-vlm`¹ | ~15GB | ~49 tok/s | 무검열(EGA), 이미지+텍스트 입력 지원 |
@@ -22,7 +23,7 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 
 > ¹ `supergemma4`는 텍스트 전용 uncensored-v2를 실행 (`supergemma4-text` 별칭 동일). 멀티모달 variant는 `supergemma4-vlm` 프로필 또는 `python llm-api-server.py --model Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit`로 실행.
 
-> ³ M5 Pro 64GB 실측 (MTP speculative decoding ON, block_size=6). Dense 27B 모델의 이론 상한(~7.6 tok/s)을 MTP가 약 60% 개선.
+> ³ M5 Pro 64GB 실측 (MTP speculative decoding ON, block_size=6). Qwen3.8-8bit는 2026-08-18, Qwen3.6-6bit는 2026-08-02 측정. Dense 27B 모델의 이론 상한을 MTP가 약 60% 개선.
 
 > ⁴ 27B dense 대비 상대 속도(공개 벤치 기준, 본 프로젝트 미실측). Qwen 공식 벤치에서 27B dense가 35B-A3B를 전 항목에서 앞서며 SkillsBench(코딩 에이전트)는 +15.5점 차이 — 기본 모델은 27B를 유지한다.
 
@@ -66,9 +67,20 @@ Qwen3.6은 파라미터가 줄었지만 Dense 아키텍처로 전환 + 멀티모
 | 항목 | 최소 | 권장 |
 |------|------|------|
 | Mac | Apple Silicon (M1+) | M3 Pro / M4 Pro 이상 |
-| 메모리 | 24GB | 64GB |
+| 메모리 | 24GB (경량 모델) | 48~64GB |
 | Python | 3.10+ | 3.11+ |
-| 디스크 | 20GB 여유 | 40GB+ |
+| 디스크 | 20GB 여유 | 50GB+ |
+
+**메모리 사양은 용도별로 다릅니다** — 모델 가중치 외에 KV cache, vision 인코더, Metal 임시 버퍼가 추가로 필요합니다:
+
+| 메모리 | 현실적인 용도 |
+|--------|--------------|
+| 24GB | 경량 모델(SuperGemma4 등) 전용. 27B 모델은 로드는 되어도 swap/OOM 위험 — 짧은 컨텍스트 실험용 |
+| 32GB | Qwen3.6-27B-6bit 단문 사용의 현실적 최소 |
+| 48GB | Qwen3.8-27B-8bit 사용 가능 (실측 피크 34GB) |
+| 64GB | 멀티모달 + 긴 컨텍스트 권장. 262K 실사용 가능 |
+
+> 1M 컨텍스트는 모델/YaRN 설정상 상한이며, 어떤 메모리 구성에서도 "1M을 채워서" 실용적으로 쓸 수 있다는 의미는 아닙니다.
 
 ---
 
@@ -88,11 +100,12 @@ cd local-llm
 
 | # | 모델 | 메모리 | 특징 |
 |:-:|------|------:|------|
-| 1 | **Qwen3.6-27B-6bit** ⭐ | ~23GB | VLM, 텍스트+이미지, Thinking 기본 OFF |
-| 2 | **SuperGemma4-26B** (무검열) | ~16GB | 무검열 보조 모델 (텍스트 전용) |
-| 3 | 직접 입력 | - | Hugging Face 모델 ID |
+| 1 | **Qwen3.8-27B-8bit** ⭐ | ~30GB | VLM, 텍스트+이미지, Thinking 기본 OFF (48GB+ 권장) |
+| 2 | **Qwen3.6-27B-6bit** | ~23GB | VLM (이전 기본, 32~48GB 환경용) |
+| 3 | **SuperGemma4-26B** (무검열) | ~16GB | 무검열 보조 모델 (텍스트 전용) |
+| 4 | 직접 입력 | - | Hugging Face 모델 ID |
 
-메모리에 따라 자동 추천이 표시됩니다. Enter만 누르면 추천 모델(Qwen3.6-27B-6bit)로 설치됩니다.
+메모리에 따라 자동 추천이 표시됩니다. Enter만 누르면 추천 모델(Qwen3.8-27B-8bit)로 설치됩니다.
 
 ### 환경만 셋업 (모델 나중에)
 

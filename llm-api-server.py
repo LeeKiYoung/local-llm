@@ -1247,7 +1247,7 @@ def main():
     global APC_ENABLED, APC_DIR, APC_MAX_GB, ALLOW_REMOTE_IMAGES
 
     parser = argparse.ArgumentParser(description="Local LLM API Server")
-    parser.add_argument("--model", type=str, default="mlx-community/Qwen3.6-27B-6bit")
+    parser.add_argument("--model", type=str, default="mlx-community/Qwen3.8-27B-8bit")
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--max-queue", type=int, default=5)

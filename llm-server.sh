@@ -1,5 +1,5 @@
 #!/bin/bash
-# Qwen3.6-27B / SuperGemma4 API 서버 실행 스크립트
+# Qwen3.8-27B / Qwen3.6-27B / SuperGemma4 API 서버 실행 스크립트
 #
 # 사용법:
 #   ./llm-server.sh              # 기본 (Thinking OFF, MTP ON)
@@ -7,7 +7,8 @@
 #   ./llm-server.sh --think      # Thinking ON (수학/코딩 정확도 향상)
 #   ./llm-server.sh 1m --think   # 1M + Thinking ON
 #   ./llm-server.sh 262k 9090    # 포트 지정
-#   ./llm-server.sh qwen36       # Qwen3.6-27B 명시적 선택
+#   ./llm-server.sh qwen38       # Qwen3.8-27B-8bit (기본값과 동일)
+#   ./llm-server.sh qwen36       # Qwen3.6-27B-6bit (이전 기본 모델)
 #   ./llm-server.sh qwen36-fast  # Qwen3.6-35B-A3B (MoE, 3B active — 3~4배 빠름, 품질은 27B가 우위)
 #   ./llm-server.sh supergemma4    # SuperGemma4 텍스트 전용 (uncensored v2, = supergemma4-text)
 #   ./llm-server.sh supergemma4-vlm  # SuperGemma4 멀티모달 (abliterated)
@@ -24,10 +25,12 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$SCRIPT_DIR/.venv/bin"
-MODEL="mlx-community/Qwen3.6-27B-6bit"
+MODEL="mlx-community/Qwen3.8-27B-8bit"
 PROFILE_DIR="$SCRIPT_DIR/profiles"
 HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
-MODEL_CONFIG=$(find "$HF_CACHE/models--mlx-community--Qwen3.6-27B-6bit/snapshots" -maxdepth 2 -name "config.json" 2>/dev/null | head -1)
+# 262k/1m 프로필 전환은 기본 모델(Qwen3.8-27B-8bit)의 캐시 config를 대상으로 한다.
+# YaRN 1M 프로필은 Qwen3.6에서 검증된 설정 — 3.8도 동일 아키텍처(qwen3_5)라 적용 가능.
+MODEL_CONFIG=$(find "$HF_CACHE/models--mlx-community--Qwen3.8-27B-8bit/snapshots" -maxdepth 2 -name "config.json" 2>/dev/null | head -1)
 PORT=8080
 USE_THINK=false
 NO_MTP=false
@@ -106,6 +109,9 @@ for arg in "$@"; do
     supergemma4-vlm)
       # 멀티모달 abliterated variant
       MODEL="Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit"
+      ;;
+    qwen38)
+      MODEL="mlx-community/Qwen3.8-27B-8bit"
       ;;
     qwen36)
       MODEL="mlx-community/Qwen3.6-27B-6bit"

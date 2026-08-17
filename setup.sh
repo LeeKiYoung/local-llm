@@ -66,37 +66,48 @@ if [ "$1" != "--no-model" ]; then
   echo "  ┌─────┬──────────────────────────┬────────┬───────────┬────────┬──────────────────────────────────┐"
   echo "  │  #  │ 모델                     │ 메모리 │ 속도      │ 최소   │ 특징                             │"
   echo "  ├─────┼──────────────────────────┼────────┼───────────┼────────┼──────────────────────────────────┤"
-  echo "  │  1  │ Qwen3.6-27B-6bit   ⭐    │ ~23GB  │ -         │ 24GB+  │ VLM, 텍스트+이미지, thinking     │"
-  echo "  │  2  │ SuperGemma4-26B          │ ~16GB  │ -         │ 24GB+  │ 무검열 보조 모델 (텍스트 전용)   │"
-  echo "  │  3  │ 직접 입력                │ -      │ -         │ -      │ Hugging Face 모델 ID             │"
+  echo "  │  1  │ Qwen3.8-27B-8bit   ⭐    │ ~30GB  │ ~10 tok/s │ 48GB+  │ VLM, 텍스트+이미지, thinking     │"
+  echo "  │  2  │ Qwen3.6-27B-6bit         │ ~23GB  │ ~12 tok/s │ 32GB+  │ VLM (이전 기본, 메모리 적음)     │"
+  echo "  │  3  │ SuperGemma4-26B          │ ~16GB  │ ~46 tok/s │ 24GB+  │ 무검열 보조 모델 (텍스트 전용)   │"
+  echo "  │  4  │ 직접 입력                │ -      │ -         │ -      │ Hugging Face 모델 ID             │"
   echo "  └─────┴──────────────────────────┴────────┴───────────┴────────┴──────────────────────────────────┘"
   echo ""
 
-  # 메모리 기반 추천 표시
+  # 메모리 기반 추천 표시 (#23: 가중치 외 KV cache/vision/Metal 버퍼 여유 필요)
   if [ "$TOTAL_GB" -lt 24 ]; then
-    echo "  💡 ${TOTAL_GB}GB 메모리 — 최소 24GB가 필요합니다. 직접 입력([3])으로 경량 모델을 선택하세요."
+    echo "  💡 ${TOTAL_GB}GB 메모리 — 최소 24GB가 필요합니다. 직접 입력([4])으로 경량 모델을 선택하세요."
+  elif [ "$TOTAL_GB" -lt 32 ]; then
+    echo "  💡 ${TOTAL_GB}GB 메모리 — [3] SuperGemma4를 권장합니다. 27B 모델은 짧은 컨텍스트 실험용으로만."
+  elif [ "$TOTAL_GB" -lt 48 ]; then
+    echo "  💡 ${TOTAL_GB}GB 메모리 — [2] Qwen3.6-27B-6bit를 권장합니다."
   else
-    echo "  💡 ${TOTAL_GB}GB 메모리 — [1] Qwen3.6-27B-6bit를 권장합니다."
+    echo "  💡 ${TOTAL_GB}GB 메모리 — [1] Qwen3.8-27B-8bit를 권장합니다."
   fi
   echo ""
 
-  read -p "  선택 [1-3] (기본: 1): " MODEL_CHOICE
+  read -p "  선택 [1-4] (기본: 1): " MODEL_CHOICE
   MODEL_CHOICE=${MODEL_CHOICE:-1}
 
   case "$MODEL_CHOICE" in
     1)
+      MODEL="mlx-community/Qwen3.8-27B-8bit"
+      MODEL_NAME="Qwen3.8-27B-8bit"
+      MODEL_SIZE="~30GB"
+      SERVER_ARG="qwen38"
+      ;;
+    2)
       MODEL="mlx-community/Qwen3.6-27B-6bit"
       MODEL_NAME="Qwen3.6-27B-6bit"
       MODEL_SIZE="~23GB"
       SERVER_ARG="qwen36"
       ;;
-    2)
+    3)
       MODEL="Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2"
       MODEL_NAME="SuperGemma4-26B-4bit"
       MODEL_SIZE="~16GB"
       SERVER_ARG="supergemma4"
       ;;
-    3)
+    4)
       read -p "  Hugging Face 모델 ID: " MODEL
       MODEL_NAME="$MODEL"
       MODEL_SIZE="알 수 없음"
