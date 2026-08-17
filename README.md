@@ -16,11 +16,11 @@ openclaw, OpenAI SDK 등 기존 클라이언트를 그대로 연결해 완전히
 | **Qwen3.6-27B-6bit** (기본) | `./llm-server.sh` | ~23GB | ~12 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
 | **Qwen3.6-35B-A3B-8bit** (빠른 프로필) | `./llm-server.sh qwen36-fast` | ~37GB | 3~4배⁴ | MoE(활성 3B) 멀티모달. 대량·반복 작업용 — 품질은 27B dense가 우위 |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
-| **SuperGemma4-26B abliterated-multimodal** | 직접 모델 ID 지정¹ | ~15GB | ~49 tok/s | 무검열(EGA), 이미지+텍스트 입력 지원 |
+| **SuperGemma4-26B abliterated-multimodal** | `./llm-server.sh supergemma4-vlm`¹ | ~15GB | ~49 tok/s | 무검열(EGA), 이미지+텍스트 입력 지원 |
 
 두 모델 동시 로드는 불가 (메모리 초과). 서버 재시작으로 전환.
 
-> ¹ abliterated-multimodal은 `python llm-api-server.py --model Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit`로 직접 실행.
+> ¹ `supergemma4`는 텍스트 전용 uncensored-v2를 실행 (`supergemma4-text` 별칭 동일). 멀티모달 variant는 `supergemma4-vlm` 프로필 또는 `python llm-api-server.py --model Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit`로 실행.
 
 > ³ M5 Pro 64GB 실측 (MTP speculative decoding ON, block_size=6). Dense 27B 모델의 이론 상한(~7.6 tok/s)을 MTP가 약 60% 개선.
 

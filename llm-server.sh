@@ -9,7 +9,8 @@
 #   ./llm-server.sh 262k 9090    # 포트 지정
 #   ./llm-server.sh qwen36       # Qwen3.6-27B 명시적 선택
 #   ./llm-server.sh qwen36-fast  # Qwen3.6-35B-A3B (MoE, 3B active — 3~4배 빠름, 품질은 27B가 우위)
-#   ./llm-server.sh supergemma4    # SuperGemma4 모델
+#   ./llm-server.sh supergemma4    # SuperGemma4 텍스트 전용 (uncensored v2, = supergemma4-text)
+#   ./llm-server.sh supergemma4-vlm  # SuperGemma4 멀티모달 (abliterated)
 #   ./llm-server.sh supergemma4 --think  # SuperGemma4 + Thinking (모델이 지원하는 경우만)
 #   ./llm-server.sh --no-mtp     # MTP speculative decoding 비활성화
 #   ./llm-server.sh --no-apc     # APC prefix caching 비활성화
@@ -98,7 +99,12 @@ show_status() {
 SERVER_ARGS=()
 for arg in "$@"; do
   case "$arg" in
-    supergemma4)
+    supergemma4|supergemma4-text)
+      # 텍스트 전용 uncensored v2 — setup.sh 선택 2와 동일 모델 (#21)
+      MODEL="Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2"
+      ;;
+    supergemma4-vlm)
+      # 멀티모달 abliterated variant
       MODEL="Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit"
       ;;
     qwen36)
