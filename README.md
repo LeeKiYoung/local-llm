@@ -83,7 +83,7 @@ cd local-llm
 `setup.sh`가 자동으로:
 1. Apple Silicon / Python / 메모리 확인
 2. 메모리에 맞는 모델 선택 메뉴 표시
-3. 가상환경 생성 + **mlx-vlm==0.6.8 / mlx==0.32.0** (Qwen MTP/KV cache/MRoPE 수정, APC 포함) + FastAPI + uvicorn 설치
+3. 가상환경 생성 + **mlx-vlm==0.6.13 / mlx==0.32.0** (Qwen MTP/KV cache/MRoPE 수정, APC 포함) + FastAPI + uvicorn 설치
 4. 선택한 모델 다운로드 + 스크립트에 자동 반영
 
 | # | 모델 | 메모리 | 특징 |
@@ -474,8 +474,8 @@ MTP는 Qwen3.6-27B 모델 가중치에 `mtp_num_hidden_layers: 1`로 **내장된
 
 ### 요구사항
 
-- mlx-vlm **0.6.8** 고정 (Qwen MTP prefill, quantized KV cache, MRoPE 위치 수정 포함)
-- `setup.sh`가 자동으로 설치: `pip install mlx-vlm==0.6.8 mlx==0.32.0`
+- mlx-vlm **0.6.13** 고정 (Qwen MTP prefill, quantized KV cache, MRoPE 위치 수정 포함)
+- `setup.sh`가 자동으로 설치: `pip install mlx-vlm==0.6.13 mlx==0.32.0`
 - 구버전 설치 시 서버 시작 시 자동 감지 후 graceful fallback (MTP 비활성화 경고 출력)
 
 ---
