@@ -18,6 +18,7 @@ tool calling(function calling)을 지원해 dsh 같은 에이전트 하네스도
 | 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
 | **Qwen3.8-27B-8bit** (기본) | `./llm-server.sh` | ~30GB (피크 34GB) | ~9.8 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
+| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) | `./llm-server.sh qwen38-uncensored` | ~30GB (피크 ~34GB) | ≈ 기본 (동일 아키텍처) | Abliterated 무검열 — 기본 모델과 동일 아키텍처: 멀티모달·툴콜·Thinking 제어·MTP 전부 유지. `uncensored` 별칭도 가능 |
 | **Qwen3.6-27B-6bit** (이전 기본) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ | 위와 동일 기능 — 메모리 32~48GB 환경용 |
 | **Qwen3.6-35B-A3B-8bit** (빠른 프로필) | `./llm-server.sh qwen36-fast` | ~37GB | 3~4배⁴ | MoE(활성 3B) 멀티모달. 대량·반복 작업용 — 품질은 27B dense가 우위 |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
@@ -263,6 +264,9 @@ OpenAI 호환 API 서버. FastAPI + mlx_vlm Python API로 직접 추론.
 ./llm-server.sh --no-mtp     # MTP speculative decoding 비활성화
 ./llm-server.sh --no-apc     # APC prefix caching 비활성화
 ./llm-server.sh --no-dsh     # dsh 대시보드 없이 API 서버만
+
+# Qwen3.8-27B 무검열 (orcarouter abliterated, 기본과 동일 아키텍처)
+./llm-server.sh qwen38-uncensored    # 첫 실행 시 ~28GB 자동 다운로드 (uncensored 별칭 동일)
 
 # Qwen3.6-27B (이전 기본, 32~48GB 환경용)
 ./llm-server.sh qwen36

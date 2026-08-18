@@ -18,6 +18,7 @@ a single `./llm-server.sh` launches both the API server (:8080) and the dsh agen
 | Model | Launch command | Memory | Speed | Notes |
 |------|----------|------:|-----:|------|
 | **Qwen3.8-27B-8bit** (default) | `./llm-server.sh` | ~30GB (peak 34GB) | ~9.8 tok/s³ | Multimodal (images), Thinking OFF by default with per-request ON, preserve_thinking support, mlx-vlm runtime |
+| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) | `./llm-server.sh qwen38-uncensored` | ~30GB (peak ~34GB) | ≈ default (same arch) | Abliterated uncensored — identical architecture to the default: multimodal, tool calling, Thinking control, MTP all preserved. `uncensored` alias works too |
 | **Qwen3.6-27B-6bit** (previous default) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ | Same features as above — for 32–48GB machines |
 | **Qwen3.6-35B-A3B-8bit** (fast profile) | `./llm-server.sh qwen36-fast` | ~37GB | 3–4x⁴ | Multimodal MoE (3B active). For bulk/repetitive work — the 27B dense is higher quality |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | Uncensored (fine-tuned), stronger tool calls / Korean / code, text only |
@@ -263,6 +264,9 @@ Reachable from other devices on the same network (e.g. a Mac mini).
 ./llm-server.sh --no-mtp     # disable MTP speculative decoding
 ./llm-server.sh --no-apc     # disable APC prefix caching
 ./llm-server.sh --no-dsh     # API server only, no dsh dashboard
+
+# Qwen3.8-27B Uncensored (orcarouter abliterated, same arch as default)
+./llm-server.sh qwen38-uncensored    # ~28GB auto-download on first run (uncensored alias works too)
 
 # Qwen3.6-27B (previous default, for 32–48GB machines)
 ./llm-server.sh qwen36

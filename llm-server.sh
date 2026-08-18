@@ -8,6 +8,7 @@
 #   ./llm-server.sh 1m --think   # 1M + Thinking ON
 #   ./llm-server.sh 262k 9090    # 포트 지정
 #   ./llm-server.sh qwen38       # Qwen3.8-27B-8bit (기본값과 동일)
+#   ./llm-server.sh qwen38-uncensored  # Qwen3.8-27B 무검열 (orcarouter abliterated, 8-bit) — uncensored 로도 가능
 #   ./llm-server.sh qwen36       # Qwen3.6-27B-6bit (이전 기본 모델)
 #   ./llm-server.sh qwen36-fast  # Qwen3.6-35B-A3B (MoE, 3B active — 3~4배 빠름, 품질은 27B가 우위)
 #   ./llm-server.sh supergemma4    # SuperGemma4 텍스트 전용 (uncensored v2, = supergemma4-text)
@@ -114,6 +115,15 @@ for arg in "$@"; do
       ;;
     qwen38)
       MODEL="mlx-community/Qwen3.8-27B-8bit"
+      ;;
+    qwen38-uncensored|uncensored)
+      # orcarouter Qwen3.8-27B abliterated (무검열), 8-bit MLX.
+      # 리포의 8-bit 서브폴더에 config가 있어 로컬 스냅샷 경로를 직접 가리킨다.
+      MODEL=$(find "$HF_CACHE/models--orcarouter--Qwen3.8-27B-Uncensored-MLX/snapshots" -maxdepth 2 -type d -name "8-bit" 2>/dev/null | head -1)
+      if [ -z "$MODEL" ]; then
+        echo "⚠️  무검열 모델 캐시를 찾을 수 없습니다. 먼저 다운로드하세요."
+        exit 1
+      fi
       ;;
     qwen36)
       MODEL="mlx-community/Qwen3.6-27B-6bit"
