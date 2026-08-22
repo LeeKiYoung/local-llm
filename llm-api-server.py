@@ -67,6 +67,11 @@ DRAFT_KIND = "mtp"          # speculative decoding 드래프트 종류 (mtp 기�
 DRAFT_BLOCK_SIZE = 6        # MTP round당 토큰 수 (draft_block_size)
 DRAFT_MODEL_ID = "mlx-community/Qwen3.8-27B-MTP-8bit"  # 드래프터 리포 (0.48GB, model_type=qwen3_5_mtp)
 draft_model = None          # 로드된 드래프터 (lifespan에서 모델과 같은 스레드에 로드)
+
+# 마지막 추론의 계측값. run_inference()의 반환 튜플을 넓히지 않기 위해 여기에 담는다
+# (반환 4-tuple은 테스트가 계약으로 고정하고 있고, 이건 결과가 아니라 계측이다).
+# gpu_semaphore가 추론을 직렬화하므로 요청 간 경쟁은 없다.
+last_metrics = {}
 _MTP_SUPPORTED = False      # mlx-vlm 버전 MTP 지원 여부 (main() 시작 시 감지)
 
 # 대형 프리필 경고 임계값 (토큰 수 추정치 기준, 실제 토큰화 전 문자 수 / 3.5 근사)
@@ -179,7 +184,19 @@ def log_entry(entry):
     duration = entry.get("duration_ms", "?")
     thinking = "🧠ON" if entry.get("enable_thinking") else "🧠OFF"
     stream = " 📡" if entry.get("stream") else ""
-    print(f"  [{entry['timestamp']}] {ip} | {thinking}{stream} | {tokens} tokens | {duration}ms | {prompt}...")
+    # duration_ms 내역 분해 — 큐 대기 / 새로 프리필한 토큰(캐시 히트분 제외) / 디코딩 속도
+    qw = entry.get("queue_wait_ms")
+    breakdown = ""
+    if qw is not None:
+        pf = entry.get("prefill_tokens"); cached = entry.get("cached_tokens")
+        dtps = entry.get("decode_tps")
+        parts = [f"q={qw}ms"]
+        if pf is not None:
+            parts.append(f"prefill={pf}" + (f"(+cache {cached})" if cached else "(cache miss)"))
+        if dtps:
+            parts.append(f"decode={dtps}tok/s")
+        breakdown = " | " + " ".join(parts)
+    print(f"  [{entry['timestamp']}] {ip} | {thinking}{stream} | {tokens} tokens | {duration}ms{breakdown} | {prompt}...")
 
 
 # ── 통계 집계 (모니터링 대시보드) ───────────────────
@@ -1005,6 +1022,23 @@ def _sampling_kwargs(params):
     }
 
 
+def _record_metrics(result):
+    """mlx-vlm GenerationResult에서 계측값을 뽑아 last_metrics에 담는다.
+
+    duration_ms 하나로는 큐 대기·프리필·디코딩이 뭉쳐서 "왜 느린지"를 가릴 수 없었다.
+    cached_tokens가 크면 프리픽스 캐시 히트, 0에 가까우면 전체 재프리필이다.
+    """
+    global last_metrics
+    cached = getattr(result, "cached_tokens", None) or 0
+    prompt_tokens = getattr(result, "prompt_tokens", None) or 0
+    last_metrics = {
+        "cached_tokens": cached,
+        "prefill_tokens": max(0, prompt_tokens - cached),   # 실제로 새로 프리필한 양
+        "prompt_tps": round(getattr(result, "prompt_tps", 0) or 0, 1),
+        "decode_tps": round(getattr(result, "generation_tps", 0) or 0, 1),
+    }
+
+
 def _is_cache_trim_bug(e):
     """mlx-vlm 0.6.13 업스트림 버그: prefix 분기 시 MTP draft의 ArraysCache에 없는
     trim()을 호출해 AttributeError 발생. 캐시를 버리고 콜드 프리필하면 정상 동작."""
@@ -1081,6 +1115,7 @@ def _run_inference_inner(params):
     full_text = result.text
     prompt_tokens = result.prompt_tokens
     completion_tokens = result.generation_tokens
+    _record_metrics(result)
     # finish_reason 방어 처리 (GenerationResult에 필드 없을 수 있음, per RESEARCH Pitfall 3)
     finish_reason = getattr(result, "finish_reason", None)
     if finish_reason is None:
@@ -1239,8 +1274,12 @@ async def chat_completions(request: Request):
 
     # 비스트리밍
     pending += 1
+    queue_wait_ms = 0
     try:
         async with gpu_semaphore:
+            # 세마포어 획득 시점 = 큐 대기 종료. GPU가 하나뿐이라 앞선 요청이 길면
+            # 짧은 요청도 그만큼 대기한다 — duration_ms만 보면 추론이 느린 것처럼 보인다.
+            queue_wait_ms = int((time.time() - start) * 1000)
             loop = asyncio.get_running_loop()
             text, finish_reason, p_tokens, c_tokens = await loop.run_in_executor(
                 _gpu_executor, partial(run_inference, params)
@@ -1266,6 +1305,8 @@ async def chat_completions(request: Request):
         "enable_thinking": params["enable_thinking"],
         "stream": False,
         "duration_ms": duration_ms,
+        "queue_wait_ms": queue_wait_ms,
+        **last_metrics,
         "prompt_preview": last_msg,
         "usage": resp["usage"],
         "finish_reason": finish_reason,
@@ -1289,9 +1330,12 @@ def _stream_response(req_id, params, ip, start, last_msg):
         completion_tokens = 0
         finish_reason = "stop"
         full_text = ""
+        queue_wait_ms = 0
 
         try:
             async with gpu_semaphore:
+                # 세마포어 획득 시점 = 큐 대기 종료 (비스트리밍 경로와 동일한 계측)
+                queue_wait_ms = int((time.time() - start) * 1000)
                 # 첫 청크: role
                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'role': 'assistant', 'content': ''}))}\n\n"
 
@@ -1365,6 +1409,7 @@ def _stream_response(req_id, params, ip, start, last_msg):
                     full_text += item.text
                     prompt_tokens = item.prompt_tokens
                     completion_tokens = item.generation_tokens
+                    _record_metrics(item)   # 마지막 청크 값이 최종 계측으로 남는다
 
                     # finish_reason 방어 처리 (GenerationResult 필드 미보장, per RESEARCH Pitfall 3)
                     item_finish = getattr(item, "finish_reason", None)
@@ -1425,6 +1470,8 @@ def _stream_response(req_id, params, ip, start, last_msg):
                 "enable_thinking": params["enable_thinking"],
                 "stream": True,
                 "duration_ms": duration_ms,
+                "queue_wait_ms": queue_wait_ms,
+                **last_metrics,
                 "prompt_preview": last_msg,
                 "usage": {
                     "prompt_tokens": prompt_tokens,
