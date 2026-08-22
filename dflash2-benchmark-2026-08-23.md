@@ -117,3 +117,26 @@ dflash 경로는 이미지를 **처리하지 못하는데 에러도 내지 않�
 ## 기각
 - Qwen3.8-9B: dflash/dspark 드래프터 HF에 없음(검색 0건). `empero-ai/Qwen3.8-9B-Distill`은 base_model이
   `Qwen/Qwen3.5-9B`인 서드파티 distill이라 "3.8의 작은 버전"이 아님. 품질 저하로 기각
+
+---
+
+## 최종: 우리 서버(llm-api-server.py)에 MTP 적용 후 실측 (2026-08-23)
+
+원인: 기존 코드가 `draft_kind`/`draft_block_size`만 넘기고 **`draft_model`을 넘기지 않아** speculative 무동작.
+`generate_step`은 `draft_model`도 받는다 (`_MTP_SUPPORTED` 감지가 `draft_kind`만 확인해 이를 놓쳤음).
+
+동일 서버·동일 프롬프트·warm·non-stream:
+| | run1 | run2 | run3 |
+|---|---|---|---|
+| baseline (`--no-draft`) | 8.82 | 9.56 | 9.57 tok/s |
+| MTP (기본) | 22.19 | 25.21 | 25.24 tok/s |
+
+**2.64×** (9.57 → 25.24). `block_size=6`이 3보다 빠름(27.65 vs 22.47, 직접 generate 측정) — 기존 기본값 6 유지.
+
+검증 완료: 이미지 정답("big blue circle and a small yellow square"), tool calling 정상(`finish_reason=tool_calls`),
+기존 테스트 108개 통과, 드래프터 로드 실패 시 speculative만 끄고 서버 계속.
+
+### 별개로 발견한 기존 이슈 (미수정)
+thinking OFF(기본)일 때 스트리밍이 실질적으로 동작하지 않음. `_stream_response`가 `</think>`를 기다리며
+전체를 버퍼링하는데, thinking OFF면 프롬프트에 `<think></think>`가 prefill돼 응답에 `</think>`가 없다.
+→ 청크 3개(thinking OFF) vs 33개(thinking ON). 이번 변경과 무관한 기존 동작.
