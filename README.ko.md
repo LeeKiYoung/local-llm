@@ -18,7 +18,7 @@ tool calling(function calling)을 지원해 dsh 같은 에이전트 하네스도
 | 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
 | **Qwen3.8-27B-8bit** (기본) | `./llm-server.sh` | ~30GB (피크 34GB) | ~25 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
-| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) | `./llm-server.sh qwen38-uncensored` | ~30GB (피크 ~34GB) | ≈ 기본 (동일 아키텍처) | Abliterated 무검열 — 기본 모델과 동일 아키텍처: 멀티모달·툴콜·Thinking 제어·MTP 전부 유지. `uncensored` 별칭도 가능 |
+| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) | `./llm-server.sh qwen38-uncensored` | ~28GB (피크 ~36GB) | ~28 tok/s⁶ | Abliterated 무검열 — 기본 모델과 동일 아키텍처: 멀티모달·툴콜·Thinking 제어·MTP 전부 유지. `uncensored` 별칭도 가능 |
 | **Qwen3.6-27B-6bit** (이전 기본) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ ⁵ | 위와 동일 기능 — 메모리 32~48GB 환경용 |
 | **Qwen3.6-35B-A3B-8bit** (빠른 프로필) | `./llm-server.sh qwen36-fast` | ~37GB | 3~4배⁴ | MoE(활성 3B) 멀티모달. 대량·반복 작업용 — 품질은 27B dense가 우위 |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
@@ -31,6 +31,8 @@ tool calling(function calling)을 지원해 dsh 같은 에이전트 하네스도
 > ³ M5 Pro 64GB 실측. Qwen3.8-8bit: MTP ON(드래프터 `mlx-community/Qwen3.8-27B-MTP-8bit`, block_size=6) 25.2 tok/s vs `--no-mtp` 9.6 tok/s — **2.64배**, 2026-08-23 측정 (warm, 비스트리밍, thinking OFF, temp=0). Qwen3.6-6bit는 2026-08-02 측정.
 
 > ⁵ Qwen3.6-27B은 **MTP OFF**로 동작합니다. 드래프터가 Qwen3.8-27B용으로 학습돼 `llm-server.sh`가 non-Qwen3.8 프로필에서 자동 비활성화합니다. 이 값은 가속 없는 실측치입니다.
+
+> ⁶ 2026-08-23 M5 Pro 64GB 실측: 코드 9.37 → **28.56 tok/s (3.05배)**, 한국어 산문 9.80 → 16.36 (1.67배). 드래프터는 정품 Qwen3.8-27B 기반이지만 abliteration으로 인한 손실은 정품 대비 ~3~6%뿐 — acceptance가 유지된다. 피크 메모리가 기본 모델보다 ~2GB 높아 48GB 환경에서는 타이트하다.
 
 > ⁴ 27B dense 대비 상대 속도(공개 벤치 기준, 본 프로젝트 미실측). Qwen 공식 벤치에서 27B dense가 35B-A3B를 전 항목에서 앞서며 SkillsBench(코딩 에이전트)는 +15.5점 차이 — 기본 모델은 27B를 유지한다.
 

@@ -18,7 +18,7 @@ a single `./llm-server.sh` launches both the API server (:8080) and the dsh agen
 | Model | Launch command | Memory | Speed | Notes |
 |------|----------|------:|-----:|------|
 | **Qwen3.8-27B-8bit** (default) | `./llm-server.sh` | ~30GB (peak 34GB) | ~25 tok/s³ | Multimodal (images), Thinking OFF by default with per-request ON, preserve_thinking support, mlx-vlm runtime |
-| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) | `./llm-server.sh qwen38-uncensored` | ~30GB (peak ~34GB) | ≈ default (same arch) | Abliterated uncensored — identical architecture to the default: multimodal, tool calling, Thinking control, MTP all preserved. `uncensored` alias works too |
+| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) | `./llm-server.sh qwen38-uncensored` | ~28GB (peak ~36GB) | ~28 tok/s⁶ | Abliterated uncensored — identical architecture to the default: multimodal, tool calling, Thinking control, MTP all preserved. `uncensored` alias works too |
 | **Qwen3.6-27B-6bit** (previous default) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ ⁵ | Same features as above — for 32–48GB machines |
 | **Qwen3.6-35B-A3B-8bit** (fast profile) | `./llm-server.sh qwen36-fast` | ~37GB | 3–4x⁴ | Multimodal MoE (3B active). For bulk/repetitive work — the 27B dense is higher quality |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | Uncensored (fine-tuned), stronger tool calls / Korean / code, text only |
@@ -31,6 +31,8 @@ Loading two models at once is not possible (exceeds memory). Switch by restartin
 > ³ Measured on an M5 Pro 64GB. Qwen3.8-8bit: 25.2 tok/s with MTP ON (drafter `mlx-community/Qwen3.8-27B-MTP-8bit`, block_size=6) vs 9.6 tok/s with `--no-mtp` — **2.64x**, measured 2026-08-23 (warm, non-streaming, thinking OFF, temp=0). Qwen3.6-6bit measured 2026-08-02.
 
 > ⁵ Qwen3.6-27B runs with **MTP OFF**: the drafter is trained for Qwen3.8-27B, so `llm-server.sh` disables it automatically on non-Qwen3.8 profiles. This row is an un-accelerated measurement.
+
+> ⁶ Measured 2026-08-23 on an M5 Pro 64GB: 9.37 → **28.56 tok/s (3.05x)** on code, 9.80 → 16.36 (1.67x) on Korean prose. The drafter is trained on stock Qwen3.8-27B, but abliteration costs only ~3-6% of the stock model's speedup — acceptance holds. Peak memory is ~2GB higher than the default model, so 48GB machines are tight.
 
 > ⁴ Relative speed vs the 27B dense (public benchmarks, not measured in this project). In Qwen's official benchmarks the 27B dense beats the 35B-A3B across the board, with a +15.5 point gap on SkillsBench (coding agents) — so the 27B stays the default.
 

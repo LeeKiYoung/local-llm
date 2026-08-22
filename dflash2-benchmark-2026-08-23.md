@@ -152,3 +152,21 @@ prefill하므로 생성 텍스트에 `</think>`가 나오지 않는다(실측 12
 
 청크 도착 간격 70~90ms로 점진 확인. think 태그 누출 0건.
 스트리밍+tools 조합도 정상(`finish_reason=tool_calls`, 구조화 tool_calls, content/`<tool_call>` 누출 없음).
+
+## 무검열 모델(abliterated)에도 동일 드래프터 적용 — 실측
+
+타겟: `orcarouter/Qwen3.8-27B-Uncensored-MLX` 8-bit (abliterated)
+드래프터: 동일한 `mlx-community/Qwen3.8-27B-MTP-8bit` (정품 Qwen3.8-27B 기반)
+
+| 프롬프트 | no draft | MTP | 배속 | 정품 모델 배속 |
+|---|---|---|---|---|
+| code | 9.37 | **28.56** | 3.05× | 3.16× |
+| prose_ko | 9.80 | 16.36 | 1.67× | 1.77× |
+
+- 드래프터 로드/바인딩 정상 (`kind=mtp`)
+- **abliteration으로 인한 acceptance 손실은 정품 대비 ~3~6%뿐.** 정품 드래프터가 거부 방향을
+  제안해 리젝이 늘 것이라 예상했으나 실측에서는 거의 차이 없음
+- 품질/무검열 특성은 구조적으로 안전 — 최종 토큰은 타겟(abliterated)이 검증해 내보내므로
+  드래프터가 무엇을 제안하든 출력 분포는 타겟의 것
+- **피크 36.3GB** (정품 33.4GB보다 높음 — 이 체크포인트가 28GB로 약간 더 큼). 48GB 환경은 타이트
+- `llm-server.sh`의 활성화 조건(`Qwen3.8-27B` 문자열 매칭)에 이 경로가 걸리므로 자동 ON
