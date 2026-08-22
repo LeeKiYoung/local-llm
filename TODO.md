@@ -1,5 +1,85 @@
 # TODO — Local LLM 개선 계획
 
+## 다음 작업 후보 (2026-08-23 실측 기반)
+
+전제: MTP·프리픽스 캐시·스트리밍은 이미 동작한다. 상세 수치는
+`dflash2-benchmark-2026-08-23.md` 참조. 아래는 **실측으로 확인된 병목**만 남긴 것.
+
+계측이 이미 로그에 있으므로 추측하지 말고 먼저 로그를 볼 것:
+`logs/YYYY-MM-DD.jsonl`의 `queue_wait_ms` / `prefill_tokens` / `cached_tokens` / `decode_tps`.
+
+---
+
+### 1. 프리픽스 캐시 슬롯 다중화 (효과 가장 큼)
+
+**문제:** `prompt_cache_state`가 전역 단일 슬롯이라, 다른 대화나 부수 요청(dsh 세션 타이틀
+생성 등)이 끼면 캐시가 덮어써지고 다음 턴이 전체 재프리필된다.
+
+**실측:** 정상 히트 시 34K 컨텍스트가 `prefill=156 cached=34478` → **8.9초**.
+슬롯을 뺏긴 직후 같은 대화가 `cached=0`으로 38K 전체 재프리필 → **130초**. 14배 차이.
+
+**접근:** 대화별 LRU dict로 전환. 키는 messages 프리픽스 해시.
+- KV 캐시는 크다(38K면 수 GB) → 슬롯 수 상한 + 메모리 상한 필수
+- **KV 캐시 배열은 MLX 스트림에 묶인다** → 생성·해제 모두 `_gpu_executor` 스레드에서
+  (`project_mlx_gotchas` 함정 2와 같은 이유). `_eval_kv_cache()` 패턴 유지
+- APC(`apc_manager`)가 원래 이 역할이지만 이 모델 계열에선 `exact` 모드로 떨어져 무용
+
+**검증:** 두 대화를 번갈아 요청 → 양쪽 모두 `cached_tokens > 0` 유지되는지
+
+**코드:** `llm-api-server.py` 전역 `prompt_cache_state`,
+`_run_inference_inner` / `_run_inference_streaming_inner`의 `prompt_cache_state=` 인자
+
+---
+
+### 2. 동시 요청 직렬화 완화
+
+**문제:** `gpu_semaphore = asyncio.Semaphore(1)`로 GPU를 하나씩만 쓴다. 짧은 요청이
+앞선 큰 요청을 통째로 기다린다.
+
+**실측:** `ctx=133 gen=8`이 큐 대기만 **56초**(조용할 때 동일 크기는 1.7초). 최대 30배 지연.
+dsh는 본 응답과 부수 요청을 병렬로 던지므로 상시 발생.
+
+**접근 A (근본):** mlx-vlm의 continuous batching 사용. `mlx_vlm.server`는 `max_num_seqs`로
+여러 시퀀스를 동시 디코딩한다. 단 우리는 `stream_generate`를 직접 호출하는 구조라
+엔진 교체급 변경이 된다 (프록시화 또는 generation 루프 이식).
+**접근 B (완화):** 짧은 요청(예상 토큰 수 기준) 우선 큐. 간단하지만 근본 해결은 아님.
+
+**검증:** 긴 요청 진행 중 짧은 요청을 던져 `queue_wait_ms` 비교
+
+---
+
+### 3. 실사용 드래프터 적중률 (원인 미해명)
+
+**문제:** 합성 프롬프트에서는 MTP가 2.24배(4.7K)인데, dsh 실사용 38K 구간은
+`decode_tps` 7.0~8.3으로 **MTP를 끈 값(8.1)과 동일**했다. 실제 대화에서는 드래프터가
+거의 기여하지 못한다.
+
+**가설:** 합성 프롬프트는 같은 문장 반복이라 예측이 쉽다. 실제 대화는 도구 출력·JSON·
+에러 로그·파일 목록이 섞여 다음 토큰 예측이 무너진다.
+
+**접근:** 먼저 acceptance rate를 계측에 노출한다.
+`mlx_vlm/speculative/common.py`의 `speculative_stats_snapshot()` /
+`speculative_stats_since()`가 있으니 이걸 `_record_metrics()`에 추가.
+그 값이 실제로 낮은지 확인한 뒤에야 대책(draft_block_size 튜닝, 도구 출력 비중이 높은
+요청에서 MTP 비활성화 등)을 논의할 수 있다.
+
+**주의:** README의 2.64× / 3.16×는 합성 프롬프트 기준값이다. 실사용 상한이 아니다.
+
+---
+
+### 이미 확인된 것 (재조사 불필요)
+
+| 항목 | 결과 |
+|---|---|
+| MTP 동작 | 정상. 36K에서도 1.85배 기여 |
+| 컨텍스트 길이 영향 | 작다. MTP OFF 기준 4.7K→36K에서 16% 감소뿐 |
+| 프리픽스 캐시 자체 | 매우 효과적 (14배), 부분 히트도 정상 |
+| 스트리밍 | thinking OFF 버퍼링 버그 수정 완료 (청크 3→33) |
+| 이미지 + MTP | 정상 동작, 함께 가속됨 |
+| dFlash2 (mlx-dspark) | 텍스트 전용, 이미지에서 무음 환각 → 미채택 |
+
+---
+
 ## 자체 API 서버 (요청별 Thinking 제어)
 
 ### 현재 vs 커스텀 서버
