@@ -24,11 +24,13 @@ mock_mlx_vlm_prompt_utils = MagicMock()
 mock_mlx_vlm_generate = MagicMock()
 mock_mlx_vlm_vision_cache = MagicMock()
 mock_mlx_vlm_apc = MagicMock()
+mock_mlx_vlm_speculative = MagicMock()
 sys.modules["mlx_vlm"] = mock_mlx_vlm
 sys.modules["mlx_vlm.prompt_utils"] = mock_mlx_vlm_prompt_utils
 sys.modules["mlx_vlm.generate"] = mock_mlx_vlm_generate
 sys.modules["mlx_vlm.vision_cache"] = mock_mlx_vlm_vision_cache
 sys.modules["mlx_vlm.apc"] = mock_mlx_vlm_apc
+sys.modules["mlx_vlm.speculative"] = mock_mlx_vlm_speculative
 
 # PIL mock (Pillow 없는 환경에서도 테스트 가능)
 mock_pil = MagicMock()

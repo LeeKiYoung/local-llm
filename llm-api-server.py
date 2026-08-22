@@ -34,6 +34,7 @@ from mlx_vlm.prompt_utils import apply_chat_template
 from mlx_vlm.generate import PromptCacheState
 from mlx_vlm.vision_cache import VisionFeatureCache
 from mlx_vlm.apc import APCManager, DiskBlockStore, apc_disk_namespace
+from mlx_vlm.speculative import load_drafter
 
 # 압축 폭탄(decompression bomb) 방지 — 50MP 이상 이미지 거부 (PIL 기본값 약 178MP)
 Image.MAX_IMAGE_PIXELS = 50_000_000
@@ -64,6 +65,8 @@ APC_MAX_GB = 20.0           # APC 디스크 캐시 상한 (GB, 0이면 무제한
 PREFILL_STEP_SIZE = 512     # 청크 프리필 크기 (토큰) — 낮을수록 OOM 위험 감소
 DRAFT_KIND = "mtp"          # speculative decoding 드래프트 종류 (mtp 기본값, None이면 비활성화)
 DRAFT_BLOCK_SIZE = 6        # MTP round당 토큰 수 (draft_block_size)
+DRAFT_MODEL_ID = "mlx-community/Qwen3.8-27B-MTP-8bit"  # 드래프터 리포 (0.48GB, model_type=qwen3_5_mtp)
+draft_model = None          # 로드된 드래프터 (lifespan에서 모델과 같은 스레드에 로드)
 _MTP_SUPPORTED = False      # mlx-vlm 버전 MTP 지원 여부 (main() 시작 시 감지)
 
 # 대형 프리필 경고 임계값 (토큰 수 추정치 기준, 실제 토큰화 전 문자 수 / 3.5 근사)
@@ -98,6 +101,7 @@ def _make_apc_manager():
 async def lifespan(_app: FastAPI):
     """모델을 _gpu_executor 스레드에서 로드 — 해당 스레드에 MLX 스트림 자연 초기화."""
     global gpu_semaphore, model, processor, prompt_cache_state, vision_cache, apc_manager
+    global draft_model, DRAFT_KIND
     gpu_semaphore = asyncio.Semaphore(1)
     loop = asyncio.get_running_loop()
 
@@ -107,12 +111,28 @@ async def lifespan(_app: FastAPI):
         vc = VisionFeatureCache()
         # APCManager도 같은 스레드에서 생성 — KV 블록이 이 스레드의 MLX 스트림에 묶임
         apc = _make_apc_manager()
-        return m, p, pcs, vc, apc
+        # 드래프터도 같은 스레드에서 로드 — 드래프터 가중치가 이 스레드의 MLX 스트림에 묶임
+        d = None
+        if DRAFT_KIND and _MTP_SUPPORTED and DRAFT_MODEL_ID:
+            d, resolved = load_drafter(DRAFT_MODEL_ID, kind=DRAFT_KIND)
+            print(f"   드래프터: {DRAFT_MODEL_ID} (kind={resolved})")
+        return m, p, pcs, vc, apc, d
 
     print(f"📥 모델 로딩: {model_id}")
-    model, processor, prompt_cache_state, vision_cache, apc_manager = await loop.run_in_executor(
-        _gpu_executor, _do_load
-    )
+    try:
+        model, processor, prompt_cache_state, vision_cache, apc_manager, draft_model = (
+            await loop.run_in_executor(_gpu_executor, _do_load)
+        )
+    except Exception as e:
+        # 드래프터 로드 실패는 치명적이지 않다 — speculative만 끄고 계속
+        if not DRAFT_KIND:
+            raise
+        print(f"⚠️  드래프터 로드 실패 ({type(e).__name__}: {e}) — MTP 없이 계속합니다")
+        DRAFT_KIND = None
+        draft_model = None
+        model, processor, prompt_cache_state, vision_cache, apc_manager, _ = (
+            await loop.run_in_executor(_gpu_executor, _do_load)
+        )
     print(f"✅ 모델 로드 완료")
 
     yield
@@ -1036,7 +1056,9 @@ def _run_inference_inner(params):
 
     # mlx_vlm.generate()는 sampler 오브젝트 불필요 — temp/top_p 직접 전달 (per RESEARCH Pitfall 2)
     draft_kwargs = {}
-    if DRAFT_KIND and _MTP_SUPPORTED:
+    if DRAFT_KIND and _MTP_SUPPORTED and draft_model is not None:
+        # draft_model이 없으면 draft_kind만 넘겨도 speculative는 동작하지 않는다 (실측 확인)
+        draft_kwargs["draft_model"] = draft_model
         draft_kwargs["draft_kind"] = DRAFT_KIND
         draft_kwargs["draft_block_size"] = DRAFT_BLOCK_SIZE
 
@@ -1117,7 +1139,9 @@ def _run_inference_streaming_inner(params):
     mx.synchronize()
 
     draft_kwargs = {}
-    if DRAFT_KIND and _MTP_SUPPORTED:
+    if DRAFT_KIND and _MTP_SUPPORTED and draft_model is not None:
+        # draft_model이 없으면 draft_kind만 넘겨도 speculative는 동작하지 않는다 (실측 확인)
+        draft_kwargs["draft_model"] = draft_model
         draft_kwargs["draft_kind"] = DRAFT_KIND
         draft_kwargs["draft_block_size"] = DRAFT_BLOCK_SIZE
 
@@ -1413,6 +1437,7 @@ def _stream_response(req_id, params, ip, start, last_msg):
 # ── 메인 ─────────────────────────────────────────
 def main():
     global model_id, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING, DRAFT_KIND, DRAFT_BLOCK_SIZE, _MTP_SUPPORTED
+    global DRAFT_MODEL_ID
     global APC_ENABLED, APC_DIR, APC_MAX_GB, ALLOW_REMOTE_IMAGES
 
     parser = argparse.ArgumentParser(description="Local LLM API Server")
@@ -1426,6 +1451,8 @@ def main():
                         help="Speculative decoding 드래프트 종류 (기본값: mtp)")
     parser.add_argument("--draft-block-size", type=int, default=6,
                         help="MTP round당 토큰 수 (기본값: 6)")
+    parser.add_argument("--draft-model", type=str, default="mlx-community/Qwen3.8-27B-MTP-8bit",
+                        help="드래프터 리포/경로 (기본값: mlx-community/Qwen3.8-27B-MTP-8bit, 0.48GB)")
     parser.add_argument("--no-draft", action="store_true", default=False,
                         help="Speculative decoding 비활성화")
     parser.add_argument("--no-apc", action="store_true", default=False,
@@ -1443,6 +1470,7 @@ def main():
     DEFAULT_THINKING = args.think
     DRAFT_KIND = None if args.no_draft else args.draft_kind
     DRAFT_BLOCK_SIZE = args.draft_block_size
+    DRAFT_MODEL_ID = args.draft_model
     APC_ENABLED = not args.no_apc
     APC_DIR = args.apc_dir
     APC_MAX_GB = args.apc_max_gb
@@ -1456,7 +1484,9 @@ def main():
     try:
         import inspect
         from mlx_vlm.generate import generate_step
-        _MTP_SUPPORTED = "draft_kind" in inspect.signature(generate_step).parameters
+        _gs_params = inspect.signature(generate_step).parameters
+        # draft_model까지 있어야 실제로 speculative가 동작한다 (draft_kind만으로는 무동작)
+        _MTP_SUPPORTED = "draft_kind" in _gs_params and "draft_model" in _gs_params
     except Exception:
         _MTP_SUPPORTED = False
 
@@ -1474,10 +1504,13 @@ def main():
         print(f"   🧠 Thinking: ON (기본, 요청별 override 가능)")
     else:
         print(f"   🧠 Thinking: OFF (기본, 요청별 override 가능)")
-    if DRAFT_KIND:
+    if DRAFT_KIND and DRAFT_MODEL_ID:
         print(f"   🚀 MTP: ON ({DRAFT_KIND}, block_size={DRAFT_BLOCK_SIZE})")
+        print(f"      드래프터: {DRAFT_MODEL_ID}")
     else:
         print(f"   🚀 MTP: OFF")
+        if DRAFT_KIND and not DRAFT_MODEL_ID:
+            DRAFT_KIND = None   # 드래프터 없이는 speculative 무동작 — 플래그도 끈다
     if APC_ENABLED:
         cap = f", 상한 {APC_MAX_GB:g}GB" if APC_MAX_GB > 0 else ", 무제한"
         print(f"   ♻️  APC: ON ({'disk: ' + APC_DIR + cap if APC_DIR else '메모리 전용'})")

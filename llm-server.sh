@@ -164,8 +164,14 @@ SERVER_ARGS+=(--model "$MODEL" --host 0.0.0.0 --port "$PORT")
 if [ "$USE_THINK" = true ]; then
   SERVER_ARGS+=(--think)
 fi
+# 드래프터(mlx-community/Qwen3.8-27B-MTP-8bit)는 Qwen3.8-27B 전용 —
+# 다른 모델 프로필에서는 자동 비활성화한다.
+MTP_OFF_REASON=""
 if [ "$NO_MTP" = true ]; then
   SERVER_ARGS+=(--no-draft)
+elif ! echo "$MODEL" | grep -qiE "Qwen3\.8-27B"; then
+  SERVER_ARGS+=(--no-draft)
+  MTP_OFF_REASON=" (드래프터가 Qwen3.8-27B 전용 — 현재 모델 미지원)"
 fi
 if [ "$NO_APC" = true ]; then
   SERVER_ARGS+=(--no-apc)
@@ -198,10 +204,10 @@ if [ "$USE_THINK" = true ]; then
 else
   echo "   🧠 Thinking: OFF (기본, 요청별 override 가능)"
 fi
-if [ "$NO_MTP" = false ]; then
+if [ "$NO_MTP" = false ] && [ -z "$MTP_OFF_REASON" ]; then
   echo "   🚀 MTP: ON (speculative decoding, block_size=6)"
 else
-  echo "   🚀 MTP: OFF"
+  echo "   🚀 MTP: OFF$MTP_OFF_REASON"
 fi
 if [ "$NO_APC" = false ]; then
   echo "   ♻️  APC: ON (prefix caching, 메모리 전용)"
