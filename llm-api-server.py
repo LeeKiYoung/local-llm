@@ -1313,8 +1313,15 @@ def _stream_response(req_id, params, ip, start, last_msg):
 
                 # preserve_thinking=False: </think> 나올 때까지 버퍼링 후 이후만 yield
                 # preserve_thinking=True: 버퍼링 없이 바로 pass-through
+                #
+                # enable_thinking=False도 pass-through다. 이 경우 chat template이
+                # <think>\n\n</think>를 완성형으로 prefill하므로 생성 텍스트에는 </think>가
+                # 나오지 않는다(실측 12/12건 0회). 그런데도 버퍼링하면 종료 태그를 끝까지
+                # 기다리다 마지막에 전체를 한 번에 내보내 스트리밍이 사실상 무효화된다
+                # (청크 3개 vs thinking ON 33개).
                 think_buf = ""
-                thinking_done = bool(params.get("preserve_thinking"))
+                thinking_done = (bool(params.get("preserve_thinking"))
+                                 or not params.get("enable_thinking"))
 
                 # tools 요청 시: <tool_call>이 시작될 수 있는 꼬리를 보류 (청크 경계 대응,
                 # think_buf와 같은 패턴). 태그 확정되면 이후 텍스트는 스트림에 내보내지 않고
@@ -1386,13 +1393,10 @@ def _stream_response(req_id, params, ip, start, last_msg):
                             if emit:
                                 yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': emit}))}\n\n"
 
-                # </think>가 끝내 안 나온 경우:
-                # - enable_thinking=False: thinking 없는 정상 응답 → 버퍼 전체 yield
-                # - enable_thinking=True: max_tokens 초과로 잘린 것 → thinking 내용 노출 방지 (issue #14)
-                if not thinking_done and think_buf and not params.get("enable_thinking"):
-                    emit = _tool_gate(think_buf)
-                    if emit:
-                        yield f"data: {json.dumps(make_chunk(req_id, params['model'], {'content': emit}))}\n\n"
+                # enable_thinking=True인데 </think>가 끝내 안 나온 경우는 max_tokens 초과로
+                # 잘린 것 — think_buf를 버려 thinking 내용 노출을 막는다 (issue #14).
+                # enable_thinking=False는 애초에 버퍼링하지 않으므로(위 thinking_done 참조)
+                # 여기서 flush할 잔여 버퍼가 없다.
 
                 full_text = strip_thinking(full_text, enable_thinking=params.get("enable_thinking", False))
 

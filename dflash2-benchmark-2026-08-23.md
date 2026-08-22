@@ -136,7 +136,19 @@ dflash 경로는 이미지를 **처리하지 못하는데 에러도 내지 않�
 검증 완료: 이미지 정답("big blue circle and a small yellow square"), tool calling 정상(`finish_reason=tool_calls`),
 기존 테스트 108개 통과, 드래프터 로드 실패 시 speculative만 끄고 서버 계속.
 
-### 별개로 발견한 기존 이슈 (미수정)
-thinking OFF(기본)일 때 스트리밍이 실질적으로 동작하지 않음. `_stream_response`가 `</think>`를 기다리며
-전체를 버퍼링하는데, thinking OFF면 프롬프트에 `<think></think>`가 prefill돼 응답에 `</think>`가 없다.
-→ 청크 3개(thinking OFF) vs 33개(thinking ON). 이번 변경과 무관한 기존 동작.
+### 함께 수정한 기존 이슈: thinking OFF 스트리밍 무효화
+thinking OFF(기본)일 때 스트리밍이 실질적으로 동작하지 않았다. `_stream_response`가 `</think>`를
+기다리며 전체를 버퍼링하는데, thinking OFF면 chat template이 `<think>\n\n</think>`를 완성형으로
+prefill하므로 생성 텍스트에 `</think>`가 나오지 않는다(실측 12/12건 0회). 종료 태그를 끝까지
+기다리다 마지막에 전체를 한 번에 내보내고 있었다.
+
+수정: `thinking_done` 초기화에 `not enable_thinking`을 추가해 pass-through. 도달 불가가 된
+잔여 flush 블록 제거.
+
+| | 수정 전 | 수정 후 |
+|---|---|---|
+| thinking OFF (기본) | 청크 3개 | **청크 33개** |
+| thinking ON | 청크 33개 | 33개 (회귀 없음) |
+
+청크 도착 간격 70~90ms로 점진 확인. think 태그 누출 0건.
+스트리밍+tools 조합도 정상(`finish_reason=tool_calls`, 구조화 tool_calls, content/`<tool_call>` 누출 없음).
