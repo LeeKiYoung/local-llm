@@ -17,9 +17,9 @@ tool calling(function calling)을 지원해 dsh 같은 에이전트 하네스도
 
 | 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
-| **Qwen3.8-27B-8bit** (기본) | `./llm-server.sh` | ~30GB (피크 34GB) | ~9.8 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
+| **Qwen3.8-27B-8bit** (기본) | `./llm-server.sh` | ~30GB (피크 34GB) | ~25 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
 | **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) | `./llm-server.sh qwen38-uncensored` | ~30GB (피크 ~34GB) | ≈ 기본 (동일 아키텍처) | Abliterated 무검열 — 기본 모델과 동일 아키텍처: 멀티모달·툴콜·Thinking 제어·MTP 전부 유지. `uncensored` 별칭도 가능 |
-| **Qwen3.6-27B-6bit** (이전 기본) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ | 위와 동일 기능 — 메모리 32~48GB 환경용 |
+| **Qwen3.6-27B-6bit** (이전 기본) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ ⁵ | 위와 동일 기능 — 메모리 32~48GB 환경용 |
 | **Qwen3.6-35B-A3B-8bit** (빠른 프로필) | `./llm-server.sh qwen36-fast` | ~37GB | 3~4배⁴ | MoE(활성 3B) 멀티모달. 대량·반복 작업용 — 품질은 27B dense가 우위 |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
 | **SuperGemma4-26B abliterated-multimodal** | `./llm-server.sh supergemma4-vlm`¹ | ~15GB | ~49 tok/s | 무검열(EGA), 이미지+텍스트 입력 지원 |
@@ -28,7 +28,9 @@ tool calling(function calling)을 지원해 dsh 같은 에이전트 하네스도
 
 > ¹ `supergemma4`는 텍스트 전용 uncensored-v2를 실행 (`supergemma4-text` 별칭 동일). 멀티모달 variant는 `supergemma4-vlm` 프로필 또는 `python llm-api-server.py --model Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit`로 실행.
 
-> ³ M5 Pro 64GB 실측 (MTP speculative decoding ON, block_size=6). Qwen3.8-8bit는 2026-08-18, Qwen3.6-6bit는 2026-08-02 측정. Dense 27B 모델의 이론 상한을 MTP가 약 60% 개선.
+> ³ M5 Pro 64GB 실측. Qwen3.8-8bit: MTP ON(드래프터 `mlx-community/Qwen3.8-27B-MTP-8bit`, block_size=6) 25.2 tok/s vs `--no-mtp` 9.6 tok/s — **2.64배**, 2026-08-23 측정 (warm, 비스트리밍, thinking OFF, temp=0). Qwen3.6-6bit는 2026-08-02 측정.
+
+> ⁵ Qwen3.6-27B은 **MTP OFF**로 동작합니다. 드래프터가 Qwen3.8-27B용으로 학습돼 `llm-server.sh`가 non-Qwen3.8 프로필에서 자동 비활성화합니다. 이 값은 가속 없는 실측치입니다.
 
 > ⁴ 27B dense 대비 상대 속도(공개 벤치 기준, 본 프로젝트 미실측). Qwen 공식 벤치에서 27B dense가 35B-A3B를 전 항목에서 앞서며 SkillsBench(코딩 에이전트)는 +15.5점 차이 — 기본 모델은 27B를 유지한다.
 
@@ -50,7 +52,7 @@ tool calling(function calling)을 지원해 dsh 같은 에이전트 하네스도
 | **아키텍처** | Dense 27B (`qwen3_5`) | Dense 27B (`qwen3_5`) — **동일, 모델 ID만 교체** |
 | **양자화** | 6bit (~22.8GB) | 8bit (~29.5GB) — 3.8은 6bit 변환본 없음 |
 | **실측 메모리** | ~23GB | 피크 ~34GB |
-| **실측 속도 (MTP ON)** | ~12 tok/s | ~9.8 tok/s |
+| **실측 속도** | ~12 tok/s (MTP OFF — 드래프터가 3.8 전용) | **~25 tok/s** (MTP ON) / 9.6 (`--no-mtp`) |
 | **컨텍스트** | 262K / 1M (YaRN) | 262K / 1M (YaRN 설정 동일 적용, 3.8 실측 미완) |
 | **Tool calling** | 미검증 | ✅ 실측 검증 (dsh E2E 포함) |
 | **Thinking** | ✅ | ✅ (전환 직후 무음 no-op 버그 있었음 → 2026-08-18 수정) |
@@ -496,7 +498,7 @@ curl http://<TAILSCALE_IP>:8080/v1/chat/completions ...
 
 - `asyncio.Semaphore(1)` — GPU 순차 처리, HTTP는 동시 수신
 - 대기 큐 5개 초과 시 429 응답 (OOM 방지)
-- **MTP Speculative Decoding** — Qwen3.8/3.6 내장 MTP 헤드 활용, 기본 ON (아래 섹션 참고)
+- **MTP Speculative Decoding** — Qwen3.8-27B용 별도 드래프터 0.48GB, 기본 ON, 실측 2.64배 (아래 섹션 참고)
 - **Prompt KV 캐시 재사용** — 멀티턴 대화에서 공통 prefix 스킵, 두 번째 턴부터 TTFT 단축 (`PromptCacheState`)
 - **Vision 인코더 캐시** — 같은 이미지 재전송 시 비전 인코더 스킵 ~1-2초 절약 (`VisionFeatureCache`)
 - **Prefill 청크 최적화** — 긴 프롬프트를 512토큰 청크로 나눠 Metal 커널 효율 향상 (`prefill_step_size`)
@@ -609,23 +611,29 @@ YaRN(Yet another RoPE extensioN)으로 위치 인코딩을 스케일링.
 
 ## MTP Speculative Decoding
 
-> Qwen3.8/3.6-27B 지원. 모델에 내장된 MTP(Multi-Token Prediction) 헤드를 활용.
+> Qwen3.8-27B 전용. **별도 드래프터 체크포인트가 필요합니다** — 아래 설명 참고.
 
 ### 개요
 
-MTP는 Qwen3.8/3.6-27B 모델 가중치에 `mtp_num_hidden_layers: 1`로 **내장된 초안 헤드**를 이용한 Speculative Decoding 기법입니다. 별도 드래프트 모델 없이 한 번의 포워드 패스에서 여러 토큰 후보를 예측하고, 검증이 통과되면 한 스텝에 여러 토큰을 확정합니다.
+MTP(Multi-Token Prediction)는 작은 초안 헤드가 여러 토큰 후보를 한 번에 제안하고, 27B 타겟이 한 번의 포워드 패스로 검증해 통과한 토큰을 그 스텝에 모두 확정하는 Speculative Decoding 기법입니다.
 
-- **출력 품질 완전 동일** — Speculative Decoding은 손실이 없음(lossless). 일반 추론과 통계적으로 동일한 분포 보장
-- **디코딩 속도 향상** — 내장 MTP 헤드가 6토큰씩 선투기, M5 Pro 기준 이론 상한(~7.6 tok/s) 대비 약 60% 개선
-- **추가 메모리 없음** — 드래프트 헤드가 메인 모델에 내장, 별도 가중치 불필요
+**드래프터를 명시적으로 넘겨야 동작합니다.** `mlx-community/Qwen3.8-27B-8bit`의 config에는 `mtp_num_hidden_layers: 1`이 선언돼 있지만 체크포인트에 **MTP 텐서가 없습니다**(`model.safetensors.index.json` 내 0건) — 즉 쓸 수 있는 내장 헤드가 없습니다. 또한 `generate_step()`은 `draft_kind`/`draft_block_size` 외에 `draft_model=`도 필요하며, 앞의 둘만 넘기면 speculative decoding이 **조용히 무동작**합니다. 이 프로젝트는 2026-08-23까지 정확히 그 상태였고, 그래서 이전 실측이 ~9.8 tok/s였습니다.
+
+- **드래프터** — `mlx-community/Qwen3.8-27B-MTP-8bit`, **0.48GB**, `model_type: qwen3_5_mtp`, 첫 실행 시 자동 다운로드. 추가 Python 패키지 불필요
+- **실측** — M5 Pro 64GB에서 9.6 → **25.2 tok/s (2.64배)**. 코드 생성에서 이득이 가장 크고(드래프터 채택률이 가장 높음) 산문에서 가장 작습니다
+- **같은 모델, 같은 품질** — 최종 토큰은 여전히 27B가 냅니다. 드래프터는 제안만 합니다. 코드·추론 출력은 `--no-mtp`와 **바이트 단위로 동일**했습니다. 장문 산문은 near-tie 지점에서 갈릴 수 있으므로(같은 두 후보가 실행마다 뒤바뀜) *동일 분포*로 보되 비트 재현성은 가정하지 마세요 — 응답 캐싱과 재현 가능한 eval은 결정성을 전제할 수 없습니다
+- **멀티모달 유지** — 이미지 요청도 정상 동작하며 함께 가속됩니다 (드래프터 config에 `vision_config` 포함)
 
 ### 기본값: ON
 
 ```
 🚀 MTP: ON (mtp, block_size=6)
+   드래프터: mlx-community/Qwen3.8-27B-MTP-8bit
 ```
 
-서버 시작 시 자동 활성화. `draft_kind="mtp"`, `draft_block_size=6`이 `generate()` 호출에 전달됩니다.
+서버 시작 시 자동 활성화되며, 드래프터는 모델과 같은 스레드에서 로드됩니다. 드래프터 로드가 실패하면 경고만 남기고 MTP 없이 계속 동작합니다. `--draft-model`로 체크포인트를 바꿀 수 있습니다. `block_size=6`이 3보다 빨라(27.7 vs 22.5 tok/s) 기본값 6을 유지합니다.
+
+non-Qwen3.8 프로필(`qwen36`, `qwen36-fast`, `supergemma4*`)은 드래프터를 자동 비활성화하고 시작 시 그 사실을 표시합니다.
 
 ### 비활성화
 
@@ -914,7 +922,7 @@ Qwen3.6-27B는 **Dense 27B 아키텍처** (MoE 아님). 전체 27B 파라미터�
 |------:|---------|--------:|--------:|
 | **24GB** | SuperGemma4-26B (경량) | ~13GB | ~46 tok/s |
 | **32GB** | Qwen3.6-27B-6bit | ~23GB | ~12 tok/s |
-| **64GB** | **Qwen3.8-27B-8bit** — 멀티모달+Thinking+tool calling | 피크 ~34GB | ~9.8 tok/s |
+| **64GB** | **Qwen3.8-27B-8bit** — 멀티모달+Thinking+tool calling | 피크 ~34GB | ~25 tok/s (MTP ON) |
 | **128GB** | Qwen3-Coder-Next 80B-A3B 등 대형 MoE | - | - |
 
 ### 용도별 추천
@@ -940,7 +948,7 @@ Qwen3.6-27B는 **Dense 27B 아키텍처** (MoE 아님). 전체 27B 파라미터�
 | GPQA Diamond | **87.8** | 82.3 | - | - |
 | 생성 속도 (MLX) | ~12 tok/s³ | ~46 tok/s | - | - |
 
-> ¹ Gemma 4 26B-it 공식 벤치마크 기준. ² 자체 측정, 독립 검증 미완료. ³ M5 Pro 64GB 실측 (2026-08-02, MTP ON). 현재 기본인 Qwen3.8-27B-8bit는 실측 ~9.8 tok/s.
+> ¹ Gemma 4 26B-it 공식 벤치마크 기준. ² 자체 측정, 독립 검증 미완료. ³ M5 Pro 64GB 실측 (2026-08-02; 당시 MTP는 무동작 상태 — MTP 섹션 참고). 현재 기본인 Qwen3.8-27B-8bit는 MTP ON에서 실측 ~25 tok/s.
 
 ### 커뮤니티 벤치마크 공유 (whatcani.run)
 

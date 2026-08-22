@@ -17,9 +17,9 @@ a single `./llm-server.sh` launches both the API server (:8080) and the dsh agen
 
 | Model | Launch command | Memory | Speed | Notes |
 |------|----------|------:|-----:|------|
-| **Qwen3.8-27B-8bit** (default) | `./llm-server.sh` | ~30GB (peak 34GB) | ~9.8 tok/s³ | Multimodal (images), Thinking OFF by default with per-request ON, preserve_thinking support, mlx-vlm runtime |
+| **Qwen3.8-27B-8bit** (default) | `./llm-server.sh` | ~30GB (peak 34GB) | ~25 tok/s³ | Multimodal (images), Thinking OFF by default with per-request ON, preserve_thinking support, mlx-vlm runtime |
 | **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) | `./llm-server.sh qwen38-uncensored` | ~30GB (peak ~34GB) | ≈ default (same arch) | Abliterated uncensored — identical architecture to the default: multimodal, tool calling, Thinking control, MTP all preserved. `uncensored` alias works too |
-| **Qwen3.6-27B-6bit** (previous default) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ | Same features as above — for 32–48GB machines |
+| **Qwen3.6-27B-6bit** (previous default) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ ⁵ | Same features as above — for 32–48GB machines |
 | **Qwen3.6-35B-A3B-8bit** (fast profile) | `./llm-server.sh qwen36-fast` | ~37GB | 3–4x⁴ | Multimodal MoE (3B active). For bulk/repetitive work — the 27B dense is higher quality |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | Uncensored (fine-tuned), stronger tool calls / Korean / code, text only |
 | **SuperGemma4-26B abliterated-multimodal** | `./llm-server.sh supergemma4-vlm`¹ | ~15GB | ~49 tok/s | Uncensored (EGA), image + text input |
@@ -28,7 +28,9 @@ Loading two models at once is not possible (exceeds memory). Switch by restartin
 
 > ¹ `supergemma4` runs the text-only uncensored-v2 (the `supergemma4-text` alias is identical). Run the multimodal variant with the `supergemma4-vlm` profile or `python llm-api-server.py --model Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit`.
 
-> ³ Measured on an M5 Pro 64GB (MTP speculative decoding ON, block_size=6). Qwen3.8-8bit measured 2026-08-18, Qwen3.6-6bit measured 2026-08-02. MTP improves the theoretical ceiling of the dense 27B by about 60%.
+> ³ Measured on an M5 Pro 64GB. Qwen3.8-8bit: 25.2 tok/s with MTP ON (drafter `mlx-community/Qwen3.8-27B-MTP-8bit`, block_size=6) vs 9.6 tok/s with `--no-mtp` — **2.64x**, measured 2026-08-23 (warm, non-streaming, thinking OFF, temp=0). Qwen3.6-6bit measured 2026-08-02.
+
+> ⁵ Qwen3.6-27B runs with **MTP OFF**: the drafter is trained for Qwen3.8-27B, so `llm-server.sh` disables it automatically on non-Qwen3.8 profiles. This row is an un-accelerated measurement.
 
 > ⁴ Relative speed vs the 27B dense (public benchmarks, not measured in this project). In Qwen's official benchmarks the 27B dense beats the 35B-A3B across the board, with a +15.5 point gap on SkillsBench (coding agents) — so the 27B stays the default.
 
@@ -50,7 +52,7 @@ Loading two models at once is not possible (exceeds memory). Switch by restartin
 | **Architecture** | Dense 27B (`qwen3_5`) | Dense 27B (`qwen3_5`) — **identical, only the model ID changed** |
 | **Quantization** | 6bit (~22.8GB) | 8bit (~29.5GB) — no 6bit conversion exists for 3.8 |
 | **Measured memory** | ~23GB | peak ~34GB |
-| **Measured speed (MTP ON)** | ~12 tok/s | ~9.8 tok/s |
+| **Measured speed** | ~12 tok/s (MTP OFF — drafter is 3.8-only) | **~25 tok/s** (MTP ON) / 9.6 (`--no-mtp`) |
 | **Context** | 262K / 1M (YaRN) | 262K / 1M (same YaRN settings applied; 1M not yet measured on 3.8) |
 | **Tool calling** | untested | ✅ verified end-to-end (including dsh E2E) |
 | **Thinking** | ✅ | ✅ (had a silent no-op bug right after the switch → fixed 2026-08-18) |
@@ -496,7 +498,7 @@ Client (:8080) → FastAPI server (direct mlx_vlm API calls)
 
 - `asyncio.Semaphore(1)` — sequential GPU processing, concurrent HTTP intake
 - Returns 429 when the wait queue exceeds 5 (OOM protection)
-- **MTP speculative decoding** — uses the built-in MTP head of Qwen3.8/3.6, ON by default (see section below)
+- **MTP speculative decoding** — separate 0.48GB drafter for Qwen3.8-27B, ON by default, 2.64x measured (see section below)
 - **Prompt KV cache reuse** — skips the common prefix in multi-turn conversations, shortening TTFT from the second turn (`PromptCacheState`)
 - **Vision encoder cache** — resending the same image skips the vision encoder, saving ~1–2s (`VisionFeatureCache`)
 - **Prefill chunking** — long prompts are split into 512-token chunks for better Metal kernel efficiency (`prefill_step_size`)
@@ -609,23 +611,29 @@ YaRN (Yet another RoPE extensioN) scales the positional encoding.
 
 ## MTP Speculative Decoding
 
-> Supported on Qwen3.8/3.6-27B. Uses the MTP (Multi-Token Prediction) head built into the model.
+> Qwen3.8-27B only. Requires a **separate drafter checkpoint** — see the note below.
 
 ### Overview
 
-MTP is a speculative decoding technique using the **draft head embedded** in the Qwen3.8/3.6-27B weights (`mtp_num_hidden_layers: 1`). Without a separate draft model, a single forward pass predicts multiple token candidates, and when verification passes, multiple tokens are committed in one step.
+MTP (Multi-Token Prediction) is a speculative decoding technique: a small draft head proposes several token candidates at once, the 27B target verifies them in a single forward pass, and every accepted token is committed in that one step.
 
-- **Output quality is fully identical** — speculative decoding is lossless, statistically guaranteeing the same distribution as normal inference
-- **Faster decoding** — the built-in MTP head speculates 6 tokens at a time; ~60% improvement over the theoretical ceiling (~7.6 tok/s) on an M5 Pro
-- **No extra memory** — the draft head is part of the main model; no separate weights needed
+**The drafter must be passed explicitly.** `mlx-community/Qwen3.8-27B-8bit` declares `mtp_num_hidden_layers: 1` in its config, but its checkpoint contains **no MTP tensors** (0 matches in `model.safetensors.index.json`) — so there is no usable embedded head. `generate_step()` also needs `draft_model=` on top of `draft_kind`/`draft_block_size`; passing only the latter two leaves speculative decoding **silently inactive**. This project shipped in exactly that state until 2026-08-23, which is why the old measurement read ~9.8 tok/s.
+
+- **Drafter** — `mlx-community/Qwen3.8-27B-MTP-8bit`, **0.48GB**, `model_type: qwen3_5_mtp`, auto-downloaded on first run. No extra Python packages
+- **Measured** — 9.6 → **25.2 tok/s (2.64x)** on an M5 Pro 64GB. Gains are largest on code (drafter acceptance is highest there) and smallest on prose
+- **Same model, same quality** — the 27B still produces every token that ships; the drafter only proposes. Code and reasoning outputs came back **byte-identical** to `--no-mtp`. Long-form prose can differ at a near-tie position (the same two candidates swap between runs), so treat output as *same distribution*, not bit-reproducible — response caching and reproducible eval runs cannot assume determinism
+- **Multimodal preserved** — image requests work and are accelerated too (the drafter config carries a `vision_config`)
 
 ### Default: ON
 
 ```
 🚀 MTP: ON (mtp, block_size=6)
+   드래프터: mlx-community/Qwen3.8-27B-MTP-8bit
 ```
 
-Auto-enabled at server start. `draft_kind="mtp"` and `draft_block_size=6` are passed to `generate()`.
+Auto-enabled at server start; the drafter loads on the same thread as the model. If the drafter fails to load, the server logs a warning and continues with MTP off. Override the checkpoint with `--draft-model`. `block_size=6` measured faster than 3 (27.7 vs 22.5 tok/s), so the default stays 6.
+
+Non-Qwen3.8 profiles (`qwen36`, `qwen36-fast`, `supergemma4*`) disable the drafter automatically and say so on startup.
 
 ### Disable
 
@@ -914,7 +922,7 @@ Qwen3.6-27B is a **dense 27B architecture** (not MoE). All 27B parameters partic
 |------:|---------|--------:|--------:|
 | **24GB** | SuperGemma4-26B (light) | ~13GB | ~46 tok/s |
 | **32GB** | Qwen3.6-27B-6bit | ~23GB | ~12 tok/s |
-| **64GB** | **Qwen3.8-27B-8bit** — multimodal + Thinking + tool calling | peak ~34GB | ~9.8 tok/s |
+| **64GB** | **Qwen3.8-27B-8bit** — multimodal + Thinking + tool calling | peak ~34GB | ~25 tok/s (MTP ON) |
 | **128GB** | Large MoE like Qwen3-Coder-Next 80B-A3B | - | - |
 
 ### Recommendations by use case
@@ -940,7 +948,7 @@ Qwen3.6-27B is a **dense 27B architecture** (not MoE). All 27B parameters partic
 | GPQA Diamond | **87.8** | 82.3 | - | - |
 | Generation speed (MLX) | ~12 tok/s³ | ~46 tok/s | - | - |
 
-> ¹ Based on official Gemma 4 26B-it benchmarks. ² Self-reported, not independently verified. ³ Measured on M5 Pro 64GB (2026-08-02, MTP ON). The current default, Qwen3.8-27B-8bit, measures ~9.8 tok/s.
+> ¹ Based on official Gemma 4 26B-it benchmarks. ² Self-reported, not independently verified. ³ Measured on M5 Pro 64GB (2026-08-02; MTP was inactive at the time — see the MTP section). The current default, Qwen3.8-27B-8bit, measures ~25 tok/s with MTP ON.
 
 ### Community benchmark sharing (whatcani.run)
 
