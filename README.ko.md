@@ -17,8 +17,8 @@ tool calling(function calling)을 지원해 dsh 같은 에이전트 하네스도
 
 | 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
-| **Qwen3.8-27B-8bit** (기본) | `./llm-server.sh` | ~30GB (피크 34GB) | ~25 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
-| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) | `./llm-server.sh qwen38-uncensored` | ~28GB (피크 ~36GB) | ~28 tok/s⁶ | Abliterated 무검열 — 기본 모델과 동일 아키텍처: 멀티모달·툴콜·Thinking 제어·MTP 전부 유지. `uncensored` 별칭도 가능 |
+| **Qwen3.8-27B-8bit** (정품) | `./llm-server.sh qwen38` | ~30GB (피크 34GB) | ~25 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
+| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) — **기본** | `./llm-server.sh` | ~28GB (피크 ~36GB) | ~28 tok/s⁶ | Abliterated 무검열, **기본 프로필**. 정품과 동일 아키텍처로 멀티모달·툴콜·Thinking 제어·MTP 전부 유지. 이 체크포인트가 캐시에 없으면 `llm-server.sh`가 정품으로 폴백한다. 정품은 `qwen38` |
 | **Qwen3.6-27B-6bit** (이전 기본) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ ⁵ | 위와 동일 기능 — 메모리 32~48GB 환경용 |
 | **Qwen3.6-35B-A3B-8bit** (빠른 프로필) | `./llm-server.sh qwen36-fast` | ~37GB | 3~4배⁴ | MoE(활성 3B) 멀티모달. 대량·반복 작업용 — 품질은 27B dense가 우위 |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
@@ -38,7 +38,7 @@ tool calling(function calling)을 지원해 dsh 같은 에이전트 하네스도
 
 ### 모델별 지원 기능
 
-| 기능 | Qwen3.8-27B (기본) / Qwen3.6-27B | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
+| 기능 | Qwen3.8-27B (정품 + 무검열) / Qwen3.6-27B | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
 |------|:-----------------:|:------------------------:|:---------------------------------:|
 | 컨텍스트 프로필 (1m/262k) | ✅ | ❌ (128K 고정) | ❌ (256K 고정) |
 | Thinking 모드 (`enable_thinking`) | ✅ (기본 OFF) | ❌ | ❌ |
@@ -260,7 +260,7 @@ OpenAI 호환 API 서버. FastAPI + mlx_vlm Python API로 직접 추론.
 같은 네트워크의 다른 기기(맥미니 등)에서 접속 가능.
 
 ```bash
-# Qwen3.8-27B (기본)
+# Qwen3.8-27B 무검열 (기본) — 정품은 `qwen38`
 ./llm-server.sh              # 262K 컨텍스트, Thinking OFF, MTP ON, dsh 대시보드 자동 실행
 ./llm-server.sh 1m           # 1M 컨텍스트 (YaRN)
 ./llm-server.sh 262k 9090    # 포트 지정

@@ -2,13 +2,13 @@
 # Qwen3.8-27B / Qwen3.6-27B / SuperGemma4 API 서버 실행 스크립트
 #
 # 사용법:
-#   ./llm-server.sh              # 기본 (Thinking OFF, MTP ON)
+#   ./llm-server.sh              # 기본 = Qwen3.8-27B 무검열 8-bit (Thinking OFF, MTP ON)
 #   ./llm-server.sh 1m           # 1M 컨텍스트
 #   ./llm-server.sh --think      # Thinking ON (수학/코딩 정확도 향상)
 #   ./llm-server.sh 1m --think   # 1M + Thinking ON
 #   ./llm-server.sh 262k 9090    # 포트 지정
-#   ./llm-server.sh qwen38       # Qwen3.8-27B-8bit (기본값과 동일)
-#   ./llm-server.sh qwen38-uncensored  # Qwen3.8-27B 무검열 (orcarouter abliterated, 8-bit) — uncensored 로도 가능
+#   ./llm-server.sh qwen38       # Qwen3.8-27B-8bit 정품 (검열 버전)
+#   ./llm-server.sh qwen38-uncensored  # 기본값과 동일 — 명시용 (uncensored 로도 가능)
 #   ./llm-server.sh qwen36       # Qwen3.6-27B-6bit (이전 기본 모델)
 #   ./llm-server.sh qwen36-fast  # Qwen3.6-35B-A3B (MoE, 3B active — 3~4배 빠름, 품질은 27B가 우위)
 #   ./llm-server.sh supergemma4    # SuperGemma4 텍스트 전용 (uncensored v2, = supergemma4-text)
@@ -27,12 +27,37 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$SCRIPT_DIR/.venv/bin"
-MODEL="mlx-community/Qwen3.8-27B-8bit"
 PROFILE_DIR="$SCRIPT_DIR/profiles"
 HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}/hub"
-# 262k/1m 프로필 전환은 기본 모델(Qwen3.8-27B-8bit)의 캐시 config를 대상으로 한다.
+
+# setup.sh가 `sed`로 이 줄(^MODEL=)을 선택 모델로 덮어쓴다 — 형식을 바꾸지 말 것.
+MODEL="mlx-community/Qwen3.8-27B-8bit"
+
+# 기본 모델은 Qwen3.8-27B 무검열(orcarouter abliterated) 8-bit이다.
+# 위 줄이 정품 3.8(= setup.sh가 건드리지 않은 초기 상태)일 때만 무검열로 승격한다.
+# setup.sh로 다른 모델을 고른 사용자의 선택은 그대로 존중하고, 무검열 캐시가 없으면
+# 정품으로 폴백한다. 정품을 명시하려면 ./llm-server.sh qwen38
+if [ "$MODEL" = "mlx-community/Qwen3.8-27B-8bit" ]; then
+  _UNCENSORED=$(find "$HF_CACHE/models--orcarouter--Qwen3.8-27B-Uncensored-MLX/snapshots" -maxdepth 2 -type d -name "8-bit" 2>/dev/null | head -1)
+  if [ -n "$_UNCENSORED" ]; then
+    MODEL="$_UNCENSORED"
+  fi
+fi
+
+# MODEL_CONFIG(262k/1m YaRN 프로필 전환 대상)은 실제 MODEL에서 파생한다.
+# 예전에는 정품 3.8 경로를 하드코딩해서, 다른 프로필로 띄워도 엉뚱한 모델의 config를
+# 고치고 있었다. MODEL은 인자 파싱 중에 바뀌므로 사용 시점에 계산한다.
 # YaRN 1M 프로필은 Qwen3.6에서 검증된 설정 — 3.8도 동일 아키텍처(qwen3_5)라 적용 가능.
-MODEL_CONFIG=$(find "$HF_CACHE/models--mlx-community--Qwen3.8-27B-8bit/snapshots" -maxdepth 2 -name "config.json" 2>/dev/null | head -1)
+MODEL_CONFIG=""
+resolve_model_config() {
+  if [ -d "$MODEL" ]; then
+    # 로컬 스냅샷 경로(무검열 프로필 등)
+    MODEL_CONFIG=$(find "$MODEL" -maxdepth 1 -name "config.json" 2>/dev/null | head -1)
+  else
+    # HF repo id → 캐시 슬러그 (org/name → models--org--name)
+    MODEL_CONFIG=$(find "$HF_CACHE/models--${MODEL//\//--}/snapshots" -maxdepth 2 -name "config.json" 2>/dev/null | head -1)
+  fi
+}
 PORT=8080
 USE_THINK=false
 NO_MTP=false
@@ -40,6 +65,7 @@ NO_APC=false
 NO_DSH=false
 
 switch_profile() {
+  resolve_model_config
   if [ -z "$MODEL_CONFIG" ]; then
     echo "⚠️  모델 캐시를 찾을 수 없습니다. 먼저 모델을 다운로드하세요."
     return 1
@@ -94,6 +120,7 @@ EOF
 }
 
 show_status() {
+  resolve_model_config
   if grep -q '"rope_type": "yarn"' "$MODEL_CONFIG" 2>/dev/null; then
     echo "📍 현재: 1M 컨텍스트 (YaRN 활성)"
   else
@@ -197,6 +224,10 @@ echo "   네트워크: http://$LOCAL_IP:$PORT"
 echo "   대시보드: http://localhost:$PORT/dashboard"
 [ -n "$TS_IP" ] && echo "   Tailscale: http://$TS_IP:$PORT"
 echo ""
+case "$MODEL" in
+  *Qwen3.8-27B-Uncensored*) echo "   🔓 모델: Qwen3.8-27B 무검열 8-bit (abliterated)" ;;
+  *) echo "   📦 모델: $MODEL" ;;
+esac
 echo "   엔드포인트: /v1/chat/completions"
 echo "   스트리밍: stream=true 지원"
 if [ "$USE_THINK" = true ]; then

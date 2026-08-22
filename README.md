@@ -17,8 +17,8 @@ a single `./llm-server.sh` launches both the API server (:8080) and the dsh agen
 
 | Model | Launch command | Memory | Speed | Notes |
 |------|----------|------:|-----:|------|
-| **Qwen3.8-27B-8bit** (default) | `./llm-server.sh` | ~30GB (peak 34GB) | ~25 tok/s³ | Multimodal (images), Thinking OFF by default with per-request ON, preserve_thinking support, mlx-vlm runtime |
-| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) | `./llm-server.sh qwen38-uncensored` | ~28GB (peak ~36GB) | ~28 tok/s⁶ | Abliterated uncensored — identical architecture to the default: multimodal, tool calling, Thinking control, MTP all preserved. `uncensored` alias works too |
+| **Qwen3.8-27B-8bit** (stock) | `./llm-server.sh qwen38` | ~30GB (peak 34GB) | ~25 tok/s³ | Multimodal (images), Thinking OFF by default with per-request ON, preserve_thinking support, mlx-vlm runtime |
+| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) — **default** | `./llm-server.sh` | ~28GB (peak ~36GB) | ~28 tok/s⁶ | Abliterated uncensored, **the default profile**. Same architecture as the stock model: multimodal, tool calling, Thinking control, MTP all preserved. If this checkpoint is not cached, `llm-server.sh` falls back to the stock model. Use `qwen38` for stock |
 | **Qwen3.6-27B-6bit** (previous default) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ ⁵ | Same features as above — for 32–48GB machines |
 | **Qwen3.6-35B-A3B-8bit** (fast profile) | `./llm-server.sh qwen36-fast` | ~37GB | 3–4x⁴ | Multimodal MoE (3B active). For bulk/repetitive work — the 27B dense is higher quality |
 | **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | Uncensored (fine-tuned), stronger tool calls / Korean / code, text only |
@@ -38,7 +38,7 @@ Loading two models at once is not possible (exceeds memory). Switch by restartin
 
 ### Feature Support by Model
 
-| Feature | Qwen3.8-27B (default) / Qwen3.6-27B | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
+| Feature | Qwen3.8-27B (stock + uncensored) / Qwen3.6-27B | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
 |------|:-----------------:|:------------------------:|:---------------------------------:|
 | Context profiles (1m/262k) | ✅ | ❌ (fixed 128K) | ❌ (fixed 256K) |
 | Thinking mode (`enable_thinking`) | ✅ (OFF by default) | ❌ | ❌ |
@@ -195,7 +195,7 @@ cd local-llm
 ### Step 2: Start the server
 
 ```bash
-# Qwen3.8-27B (default) — runs API server + dsh dashboard together
+# Qwen3.8-27B uncensored (default) — runs API server + dsh dashboard together
 ./llm-server.sh
 
 # 1M context mode
@@ -260,7 +260,7 @@ OpenAI-compatible API server. FastAPI + the mlx_vlm Python API for direct infere
 Reachable from other devices on the same network (e.g. a Mac mini).
 
 ```bash
-# Qwen3.8-27B (default)
+# Qwen3.8-27B uncensored (default) — `qwen38` for the stock model
 ./llm-server.sh              # 262K context, Thinking OFF, MTP ON, dsh dashboard auto-launch
 ./llm-server.sh 1m           # 1M context (YaRN)
 ./llm-server.sh 262k 9090    # custom port
