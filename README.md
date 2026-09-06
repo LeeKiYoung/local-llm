@@ -47,6 +47,10 @@ Loading two models at once is not possible (exceeds memory). Switch by restartin
 | Image input (multimodal) | ✅ | ❌ | ✅ |
 | Video input | ❌ | ❌ | ❌ |
 
+### Qwen3.8-Flash-Next (released 2026-08-26) — not adopted for now
+
+A Qwen4-architecture preview: 125B MoE with 6B active, plus a 51B n-gram embedding table (`model_type=qwen4_exp`). It beats Qwen3.8-27B on every published benchmark (DeepSWE 58.7 vs 42.2, JobBench 55.7 vs 33.4), but **it does not fit in 64GB**: the smallest MLX conversion is 68GB on disk, the official 4-bit is 112GB, and even mlx-vlm 0.7.0rc0's external PLE storage (n-gram table on SSD) leaves ~72GB resident. Requires mlx-vlm ≥ 0.6.17 (MTP only in 0.7.0rc0); this project is on 0.6.13. Revisit conditions are tracked in `TODO.md` §4.
+
 ### Qwen3.6 → Qwen3.8 Switch (2026-08-18, current)
 
 | Item | Qwen3.6-27B-6bit *(previous default)* | Qwen3.8-27B-8bit *(current default)* |

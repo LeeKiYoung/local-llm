@@ -67,6 +67,37 @@ dsh는 본 응답과 부수 요청을 병렬로 던지므로 상시 발생.
 
 ---
 
+### 4. Qwen3.8-Flash-Next 전환 — 보류 (2026-09-06 리서치)
+
+**모델:** 2026-08-26 공개, Qwen4 아키텍처 프리뷰. MoE 125B / 활성 6B + n-gram(PLE) 임베딩 51B
++ MTP 4B. `model_type=qwen4_exp`(우리 27B는 `qwen3_5`). 멀티모달, 256K, thinking 기본 ON.
+27B 대비 DeepSWE 58.7 vs 42.2, JobBench 55.7 vs 33.4, SWE-bench Pro 62.5 vs 61.7.
+
+**보류 이유: 64GB에 안 들어간다.**
+
+| MLX 체크포인트 | 디스크 | 비고 |
+|---|---|---|
+| mlx-community 4-bit | 112GB | 공식 변환 |
+| orcarouter Uncensored 4-bit | 163GB | experts·n-gram 고정밀 유지, 실효 7.85bpw |
+| Sawfwair mixed-2bit | 68GB | 128GB 권장, prompt+output 2048 토큰 제한 |
+| Unsloth 1-bit 가이드 | RAM 75GB | 96GB+ 권장 |
+
+- mlx-vlm 0.7.0rc0의 external PLE 스토리지(n-gram 테이블 SSD 상주)로도 상주 메모리 71.68GB (PR #2045).
+- 48GB Mac 사례(slotstream)는 expert까지 SSD 오프로드하는 별도 Swift 런타임. 12 tok/s, 70~80K 컨텍스트 문제, SSD 마모 우려. 현재 27B MTP ON(~26 tok/s)보다 느리다.
+- 설치된 mlx-vlm 0.6.13. Flash-Next 지원은 0.6.17부터, MTP/PLE 외부 스토리지는 0.7.0rc0. 지금 올리면 `qwen3_5` MTP 경로만 위험.
+
+**재검토 조건 (하나라도 충족 시):**
+1. mlx-vlm 0.7.0 정식 릴리스 + 64GB Mac 상주 메모리 실측 보고
+2. 128GB급 Mac 확보 (M4 Max 128GB: 상주 ~75GB, MTP ON 78 tok/s 보고)
+3. n-gram 테이블까지 4-bit로 깎은 60GB 이하 변환본 등장
+
+**이슈:** #26
+**참고:** https://huggingface.co/Qwen/Qwen3.8-Flash-Next ·
+https://huggingface.co/mlx-community/Qwen3.8-Flash-Next-4bit ·
+https://github.com/Blaizzy/mlx-vlm/pull/2045 · https://news.ycombinator.com/item?id=49524447
+
+---
+
 ### 이미 확인된 것 (재조사 불필요)
 
 | 항목 | 결과 |

@@ -47,6 +47,10 @@ tool calling(function calling)을 지원해 dsh 같은 에이전트 하네스도
 | 이미지 입력 (멀티모달) | ✅ | ❌ | ✅ |
 | 영상 입력 | ❌ | ❌ | ❌ |
 
+### Qwen3.8-Flash-Next (2026-08-26 공개) — 현재 미채택
+
+Qwen4 아키텍처 프리뷰. MoE 125B / 활성 6B + n-gram 임베딩 51B (`model_type=qwen4_exp`). 공개 벤치 전 항목에서 Qwen3.8-27B를 앞서지만(DeepSWE 58.7 vs 42.2, JobBench 55.7 vs 33.4) **64GB에 들어가지 않는다**: 가장 작은 MLX 변환본이 디스크 68GB, 공식 4-bit는 112GB, mlx-vlm 0.7.0rc0의 external PLE 스토리지(n-gram 테이블 SSD 상주)를 써도 상주 메모리 약 72GB. mlx-vlm 0.6.17 이상 필요(MTP는 0.7.0rc0에만), 이 프로젝트는 0.6.13. 재검토 조건은 `TODO.md` §4 참고.
+
 ### Qwen3.6 → Qwen3.8 전환 (2026-08-18, 현재)
 
 | 항목 | Qwen3.6-27B-6bit *(이전 기본)* | Qwen3.8-27B-8bit *(현재 기본)* |
