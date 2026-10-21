@@ -171,6 +171,7 @@ local-llm/
 ├── llm-server.sh                         # API server launcher
 ├── llm-api-server.py                     # FastAPI custom API server (core)
 ├── llm-proxy.py                          # Transparent logging proxy (optional)
+├── decision-server.sh                    # Kev decision model sidecar (Jev-compatible, :8009)
 ├── profiles/
 │   ├── config-qwen36-27b-262k.json       # Default profile (262K, Qwen3.6-27B)
 │   └── config-qwen36-27b-1m.json         # Extended profile (1M YaRN, Qwen3.6-27B)
@@ -178,7 +179,8 @@ local-llm/
 │   ├── test_api_server.py                # API server tests
 │   ├── test_tool_calling.py              # tool calling / thinking tests
 │   ├── test_stats.py                     # dashboard aggregation tests
-│   └── test_proxy.py                     # proxy tests (108 total)
+│   ├── test_decisions.py                 # /v1/systemone decision endpoint tests
+│   └── test_proxy.py                     # proxy tests (126 total)
 ├── local-llm-guide-2026.md               # Model comparison guide
 ├── .venv/                                # Python virtualenv
 └── logs/                                 # Request/response JSONL logs (auto-created)
@@ -574,6 +576,122 @@ curl -s "localhost:8080/api/stats?days=30" | jq '.duration_ms'
 > `days` counts **date files, not rolling 24-hour windows**. `days=1` reads only today's
 > `logs/YYYY-MM-DD.jsonl`, so right after midnight last night's requests won't appear.
 > Use `days=2` or more to cover that window.
+
+---
+
+## Decision Model Sidecar (Jev-compatible Kev)
+
+A **decision model** does not write text: you send a `state` plus typed questions and it returns a
+probability for each option in one forward pass. TypeSafe's [Jev](https://docs.typesafe.ai) is
+hosted-only (no open weights). [Kev](https://github.com/jaredpalmer/kev) (Apache-2.0) is an open
+Jev-like family (Qwen3.5 base + LoRA adapter + pointer head) that serves **the same System One API**
+(`POST /v1/systemone`), so client code written for Jev works by changing only the base URL.
+
+It is useful where code asks the same closed question over and over and branches on the confidence —
+routing, "did the user actually ask for this command?", "is this 'done' claim backed by the tool
+output?", classification. (This is the revisit condition from #27; a Hermes agent plugin now logs
+decisions at three such points.) It is a **separate sidecar** on port 8009 and does not touch the
+`llm-server.sh` chat server on 8080.
+
+```bash
+./decision-server.sh              # Kev-4B (default) on 127.0.0.1:8009
+./decision-server.sh 0.8b         # smallest, low accuracy
+./decision-server.sh 9b 9009      # larger model, custom port
+./decision-server.sh --setup      # install only (clones kev into .kev/, uv sync)
+KEV_API_KEY=... ./decision-server.sh --host 0.0.0.0   # non-loopback needs a key (refuses without one)
+```
+
+Requires [uv](https://docs.astral.sh/uv/) (kev pins Python 3.13; torch has no 3.14 wheels). The first
+run downloads the base model (4B ≈ 9GB).
+
+```bash
+curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "kev-latest",
+  "state": {"request": "Review PR #250 only, I will merge it myself", "command": "gh pr merge 250 --squash"},
+  "questions": {
+    "action": {"type": "choice", "instructions": "How should the agent handle this command?",
+               "criteria": {"run": "Requested, run it", "ask": "Ask the user first", "reply": "Not requested, answer in words"}},
+    "requested": {"type": "noul", "instructions": "Did the user ask for this exact action?"}
+  }
+}'
+# → {"answers": {"action": {"choice": "...", "probabilities": {...}, "confidence": ...}, "requested": {"type": "noul", "noul": ...}}, ...}
+```
+
+The server is plain HTTP, so a bearer key travels in clear text: expose it only inside an encrypted
+network (Tailscale) or keep it on 127.0.0.1 behind a TLS-terminating proxy. The Kev source is pinned
+to the `kev-1.0` release together with the `v1.0` weights.
+
+Hosted Jev uses the identical request: `https://openrouter.ai/api/v1/systemone` with
+`"model": "typesafe/jev-1.14"` and an OpenRouter key (about $0.00002 per call, output is free).
+
+### Measured on an M4 Mac mini 16GB (2026-10-21, Kev-4B@v1.0, MLX bf16)
+
+| Item | Result |
+|---|---|
+| Memory | steady 8.6–9.9GB, **peak 15GB** (1.4GB swap) — start it on demand, don't keep it resident on 16GB |
+| Load (model cached) | ~60s |
+| Latency | first request 18.7s (warm-up), then 0.5–1.6s per request |
+| Korean accuracy (8 Korean KB events, labels by a strong LLM grader) | **Jev 8/8 (Brier 0.099) vs Kev 5/8 (Brier 0.408)**, Kev had no answer ≥0.8 confidence |
+
+Kev's model card says **English only**; write instructions/criteria in English and keep the content
+as-is, and measure on your own data before trusting a threshold. On a 64GB Mac, Kev-4B should fit next
+to the 27B chat server (~34GB) — expected, not measured. Sizes: 0.8B any Mac · 4B 32GB recommended
+(works on 16GB with swap) · 9B 32GB+.
+
+### Built-in endpoint on the chat server (`--decide`)
+
+The chat server can answer the same `/v1/systemone` requests on its own port, so a client that already
+talks to `:8080` gets decisions without another base URL. It is **off by default**.
+
+```bash
+./llm-server.sh --decide       # engine "llm": the loaded chat model scores the options
+./llm-server.sh --decide-kev   # engine "kev": forward to the Kev sidecar (start ./decision-server.sh first)
+# directly: python llm-api-server.py --decision-engine llm|kev [--kev-url URL] [--decision-temperature T]
+```
+
+**What "sidecar" means here.** Like the passenger car bolted to a motorcycle: a small helper server
+that runs *next to* the main one as its own process. The main server is the chat server (`llm-server.sh`,
+the 27B on `:8080`); the sidecar is the Kev decision server (`decision-server.sh`, `:8009`). It has its own
+memory and is started and stopped separately.
+
+**`--decide` vs `--decide-kev`.** Both answer decision requests at the same `:8080/v1/systemone`, in the
+same format — a client can't tell them apart. **Only the model that makes the decision differs.**
+
+| | `--decide` (engine `llm`) | `--decide-kev` (engine `kev`) |
+|---|---|---|
+| Who decides | **the chat model that is already loaded (27B)** | **the Kev sidecar** (a dedicated 4B decision model) |
+| How | shows the 27B options A/B/C and reads how likely each first letter is | the chat server forwards the request to Kev (`:8009`) and returns its answer |
+| Extra memory | none | ~10GB for Kev |
+| Korean | expected strong with the 27B (6/8 when tested with a 4B) | weak (5/8 — Kev is English-only) |
+| Calibrated probabilities | no — fit a temperature/thresholds on labeled data | yes — trained for calibration |
+| Before starting | nothing | start `./decision-server.sh` first |
+
+In one line: `--decide` lets the big model take on decisions too; `--decide-kev` hands them to a small
+decision-only model running beside it. For Korean on a 64GB Mac, `--decide` is the likely better pick —
+just remember its probabilities aren't calibrated.
+
+How the `llm` engine works: for each question it renders `STATE / QUESTION / OPTIONS (A, B, C…)` with
+the model's chat template (thinking off), runs **one prefill and reads the first-token log-probabilities**
+(no generation, no MTP draft, chat prompt cache untouched), and renormalizes the probability mass on the
+option letters. `noul` = P(yes), `choice` = argmax with per-option probabilities, `score` = probability-
+weighted level index; `confidence` is the top option's probability. Each answer also carries
+`coverage` — how much of the whole vocabulary's probability landed on the option letters; well below 1
+means the model did not follow the "answer with one letter" format, so treat that answer as unreliable.
+It shares the GPU queue with chat requests (`429` when the queue is full).
+
+Notes from testing on an M4 16GB with `mlx-community/Qwen3.5-4B-MLX-4bit` (the 27B can't load there):
+- 3 questions in 2.3s, 2 questions in 1.0s; `coverage` 0.998–0.999
+- log-softmax is computed in float32 (`logits_processors`) — mlx-vlm otherwise does it in bf16 and the
+  option probabilities summed to 1.02. The logits themselves are still bf16, so two near-equal options
+  can come out exactly equal (e.g. `noul: 0.5`).
+- the probabilities are **not calibrated** (unlike Jev/Kev, which are trained for it): tune
+  `--decision-temperature` and your thresholds on labeled data.
+- the same 8 Korean events: **Jev 8/8 · this engine with the 4B 6/8 · Kev-4B 5/8**. The 27B should do
+  better (not measured).
+- works with the official TypeSafe Python SDK unchanged (`TypeSafeClient(base_url="http://127.0.0.1:8080")`,
+  noul / choice / score parsed); chat replies at temperature 0 are byte-identical with and without
+  decision calls interleaved
+- not yet run with the 27B + MTP + APC interleaved with chat traffic (needs a 64GB Mac)
 
 ---
 
@@ -1042,7 +1160,7 @@ llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # com
 ## Tests
 
 ```bash
-# Full test suite (108 tests, mocked model — no GPU required)
+# Full test suite (126 tests, mocked model — no GPU required)
 .venv/bin/python -m pytest tests/ -v
 ```
 
@@ -1063,6 +1181,9 @@ llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # com
 | Stream | stream_chunks | role → content → finish_reason → [DONE] |
 | RateLimit | queue_full | 429 response when the queue is full |
 | Logging | log_file_created | JSONL log file creation + field validation |
+| Decision | parse_decision_request | System One request validation (noul / choice / score, 422 cases) |
+| Decision | option_probs | first-token logprobs → renormalized option probabilities, coverage, temperature |
+| Decision | systemone (llm / kev / off) | answers per type, one prefill per question in float32, Kev forwarding, 404/429/502 |
 
 ---
 

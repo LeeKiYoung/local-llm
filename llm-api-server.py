@@ -14,9 +14,12 @@ import argparse
 import asyncio
 import concurrent.futures
 import json
+import math
 import os
 import random
 import time
+import urllib.error
+import urllib.request
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -1205,6 +1208,174 @@ def _run_inference_streaming_inner(params):
         mx.clear_cache()
 
 
+# ── 판단모델 (/v1/systemone, TypeSafe System One 호환) ──
+# state + 타입 있는 질문(noul / choice / score) → 선택지별 확률. 글을 생성하지 않는다.
+#   llm: 로드된 모델로 질문마다 프리필 1회 → 첫 토큰 logprobs에서 선택지 글자(A, B, …) 확률을 읽음
+#   kev: Kev 사이드카(decision-server.sh)로 요청을 그대로 전달
+DECISION_ENGINE = "off"           # off | llm | kev (--decision-engine)
+KEV_URL = "http://127.0.0.1:8009"  # --kev-url
+DECISION_TEMPERATURE = 1.0         # llm 엔진 확률 보정 온도 — softmax(logprob / T), --decision-temperature
+_OPTION_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_DECISION_SYSTEM = (
+    "You are a decision function. Read the STATE and answer the QUESTION by choosing exactly one of "
+    "the listed options. Reply with the option letter only."
+)
+
+
+def parse_decision_request(data: dict) -> dict:
+    """System One 요청 검증 → {"state": 텍스트, "questions": {이름: {type, instructions, options}}}"""
+    if not isinstance(data, dict):
+        raise ValueError("request body must be a JSON object")
+    if data.get("assets"):
+        raise ValueError("assets (images) are not supported by the local decision engine")
+    if "state" not in data:
+        raise ValueError("state is required")
+    questions = data.get("questions")
+    if not isinstance(questions, dict) or not questions:
+        raise ValueError("questions must be a non-empty object")
+    state = data["state"]
+    state_text = state if isinstance(state, str) else json.dumps(state, ensure_ascii=False, indent=1)
+
+    parsed = {}
+    for name, q in questions.items():
+        if not isinstance(q, dict):
+            raise ValueError(f"questions.{name} must be an object")
+        qtype, criteria = q.get("type"), q.get("criteria")
+        instructions = str(q.get("instructions") or "")
+        if qtype == "noul":
+            if criteria:  # noul의 criteria는 "예"의 조건 — 질문에 덧붙인다
+                instructions += f"\nCriteria: {criteria if isinstance(criteria, str) else json.dumps(criteria, ensure_ascii=False)}"
+            options = [("yes", "yes"), ("no", "no")]
+        elif qtype == "choice":
+            if isinstance(criteria, dict) and criteria:
+                # TypeSafe SDK는 설명 없는 선택지를 {"calm": None}으로 보낸다
+                options = [(str(k), str(k) if v is None else str(v)) for k, v in criteria.items()]
+            elif isinstance(criteria, list) and criteria:
+                options = [(str(c), str(c)) for c in criteria]
+            else:
+                raise ValueError(f"questions.{name}: choice needs criteria (object or list)")
+        elif qtype == "score":
+            if not isinstance(criteria, list) or len(criteria) < 2:
+                raise ValueError(f"questions.{name}: score needs criteria as an ordered list of 2+ levels")
+            options = [(str(i), str(c)) for i, c in enumerate(criteria)]
+        else:
+            raise ValueError(f"questions.{name}: unsupported type {qtype!r} (noul, choice, score)")
+        if len(options) > len(_OPTION_LETTERS):
+            raise ValueError(f"questions.{name}: at most {len(_OPTION_LETTERS)} options")
+        parsed[name] = {"type": qtype, "instructions": instructions, "options": options}
+    return {"state": state_text, "questions": parsed}
+
+
+def _decision_messages(state_text, question):
+    """state를 앞에 두고 질문을 뒤에 — 같은 state의 여러 질문이 프롬프트 앞부분을 공유하도록"""
+    lines = [f"STATE:\n{state_text}", "", f"QUESTION: {question['instructions']}", "OPTIONS:"]
+    for letter, (key, desc) in zip(_OPTION_LETTERS, question["options"]):
+        lines.append(f"{letter}) {key}" if desc == key else f"{letter}) {key}: {desc}")
+    lines.append("Answer with one letter.")
+    return [{"role": "system", "content": _DECISION_SYSTEM}, {"role": "user", "content": "\n".join(lines)}]
+
+
+def _letter_token_ids(tokenizer, count):
+    """선택지 글자별 단일 토큰 id 목록 ("A"와 " A"처럼 변형이 있으면 둘 다)"""
+    ids = []
+    for letter in _OPTION_LETTERS[:count]:
+        cands = set()
+        for text in (letter, " " + letter):
+            toks = tokenizer.encode(text, add_special_tokens=False)
+            if len(toks) == 1:
+                cands.add(toks[0])
+        if not cands:
+            raise RuntimeError(f"tokenizer has no single token for option letter {letter}")
+        ids.append(sorted(cands))
+    return ids
+
+
+def option_probs(logprobs, token_ids, temperature=1.0):
+    """첫 토큰 logprobs → 선택지 확률 (변형 토큰은 합산, 선택지끼리 재정규화).
+    coverage = 전체 어휘 중 선택지 글자에 실린 확률 — 낮으면 모델이 지시를 안 따른 것."""
+    raw = [math.log(sum(math.exp(logprobs[i].item()) for i in ids)) for ids in token_ids]
+    coverage = sum(math.exp(r) for r in raw)
+    scaled = [r / temperature for r in raw]
+    top = max(scaled)
+    exps = [math.exp(s - top) for s in scaled]
+    total = sum(exps)
+    return [e / total for e in exps], coverage
+
+
+def make_decision_answer(question, probs):
+    """선택지 확률 → System One 답 형식 (noul / choice / score)"""
+    keys = [k for k, _ in question["options"]]
+    if question["type"] == "noul":
+        return {"type": "noul", "noul": round(probs[0], 4)}
+    best = max(range(len(probs)), key=probs.__getitem__)
+    probabilities = {k: round(p, 4) for k, p in zip(keys, probs)}
+    if question["type"] == "choice":
+        return {"type": "choice", "choice": keys[best], "confidence": round(probs[best], 4),
+                "probabilities": probabilities}
+    return {"type": "score", "score": round(sum(i * p for i, p in enumerate(probs)), 4),
+            "confidence": round(probs[best], 4), "legend": dict(question["options"]),
+            "probabilities": probabilities}
+
+
+def _logits_to_float32(tokens, logits):
+    return logits.astype(mx.float32)
+
+
+def run_decision(parsed):
+    """llm 엔진: 질문마다 프리필 1회 + 첫 토큰 logprobs만 읽는다 (생성·채팅 프롬프트 캐시 미사용)"""
+    tokenizer = getattr(processor, "tokenizer", processor)
+    answers, prompt_tokens = {}, 0
+    mx.synchronize()
+    try:
+        for name, q in parsed["questions"].items():
+            formatted = apply_chat_template(
+                processor, model.config, _decision_messages(parsed["state"], q),
+                num_images=0, enable_thinking=False,
+            )
+            # draft_model을 넘기지 않음 — speculative 경로에서는 logprobs가 None.
+            # logits_processors로 float32 승격: mlx-vlm은 log-softmax를 로짓 dtype(bf16)으로 계산해서
+            # 선택지 확률 합이 1을 넘거나(실측 coverage 1.02) 근접한 두 값이 같은 값으로 뭉개진다.
+            gen = stream_generate(model, processor, formatted, max_tokens=1, temperature=0.0,
+                                  prefill_step_size=PREFILL_STEP_SIZE,
+                                  logits_processors=[_logits_to_float32])
+            first = next(gen)
+            gen.close()
+            probs, coverage = option_probs(
+                first.logprobs, _letter_token_ids(tokenizer, len(q["options"])), DECISION_TEMPERATURE)
+            answers[name] = {**make_decision_answer(q, probs), "coverage": round(coverage, 4)}
+            prompt_tokens += first.prompt_tokens or 0
+    finally:
+        # 채팅 경로와 같은 순서 — 채팅 KV가 lazy인 채로 clear_cache()하면 다음 채팅 요청에서 command buffer 충돌
+        _eval_kv_cache(prompt_cache_state)
+        mx.synchronize()
+        mx.clear_cache()
+    return answers, prompt_tokens
+
+
+def _post_json(url, body, headers, timeout=180):
+    req = urllib.request.Request(url, data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", **headers})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.load(e)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return e.code, {"detail": str(e.reason)}
+
+
+async def _proxy_kev(data, request):
+    """kev 엔진: 사이드카에 그대로 전달 (Authorization 헤더 포함)"""
+    headers = {"Authorization": request.headers["authorization"]} if "authorization" in request.headers else {}
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None, partial(_post_json, KEV_URL.rstrip("/") + "/v1/systemone", data, headers))
+    except (urllib.error.URLError, OSError) as e:
+        return 502, {"detail": f"Kev sidecar unreachable at {KEV_URL} ({e}) — start it with ./decision-server.sh"}
+
+
 # ── 엔드포인트 ────────────────────────────────────
 @app.get("/api/stats")
 async def api_stats(days: int = DEFAULT_STATS_DAYS):
@@ -1316,6 +1487,64 @@ async def chat_completions(request: Request):
     })
 
     return resp
+
+
+@app.post("/v1/systemone")
+async def systemone(request: Request):
+    """TypeSafe System One 호환 판단 엔드포인트 — Jev/Kev 클라이언트를 주소만 바꿔 그대로 사용"""
+    global pending
+
+    if DECISION_ENGINE == "off":
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "decision engine is off — start the server with --decision-engine llm|kev"},
+        )
+    try:
+        data = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return JSONResponse(status_code=422, content={"detail": [{"msg": "body must be JSON", "type": "value_error"}]})
+    ip = request.client.host if request.client else "?"
+    start = time.time()
+
+    if DECISION_ENGINE == "kev":
+        status, payload = await _proxy_kev(data, request)
+        log_entry({"timestamp": datetime.now().isoformat(), "ip": ip, "endpoint": "systemone",
+                   "engine": "kev", "status": status, "duration_ms": int((time.time() - start) * 1000),
+                   "finish_reason": "decision"})
+        return JSONResponse(status_code=status, content=payload)
+
+    try:
+        parsed = parse_decision_request(data)
+    except ValueError as e:
+        return JSONResponse(status_code=422, content={"detail": [{"msg": str(e), "type": "value_error"}]})
+    if pending >= MAX_QUEUE:
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"message": "Server busy", "type": "rate_limit_error"}},
+        )
+
+    pending += 1
+    try:
+        async with gpu_semaphore:  # 채팅 추론과 같은 GPU 스레드·순서를 공유
+            loop = asyncio.get_running_loop()
+            answers, p_tokens = await loop.run_in_executor(_gpu_executor, partial(run_decision, parsed))
+    finally:
+        pending -= 1
+
+    duration_ms = int((time.time() - start) * 1000)
+    log_entry({
+        "timestamp": datetime.now().isoformat(),
+        "ip": ip,
+        "endpoint": "systemone",
+        "engine": "llm",
+        "duration_ms": duration_ms,
+        "questions": len(answers),
+        "usage": {"prompt_tokens": p_tokens, "completion_tokens": 0},
+        "prompt_preview": parsed["state"][:100],
+        "finish_reason": "decision",
+    })
+    return {"model": model_id, "answers": answers,
+            "usage": {"input_tokens": p_tokens, "output_tokens": 0}, "latency_ms": duration_ms}
 
 
 # ── 스트리밍 ──────────────────────────────────────
@@ -1490,6 +1719,7 @@ def main():
     global model_id, MAX_QUEUE, LOG_DIR, DEFAULT_THINKING, DRAFT_KIND, DRAFT_BLOCK_SIZE, _MTP_SUPPORTED
     global DRAFT_MODEL_ID
     global APC_ENABLED, APC_DIR, APC_MAX_GB, ALLOW_REMOTE_IMAGES
+    global DECISION_ENGINE, KEV_URL, DECISION_TEMPERATURE
 
     parser = argparse.ArgumentParser(description="Local LLM API Server")
     parser.add_argument("--model", type=str, default="mlx-community/Qwen3.8-27B-8bit")
@@ -1514,6 +1744,12 @@ def main():
                         help="APC 디스크 캐시 상한 GB (기본값: 20, 0이면 무제한)")
     parser.add_argument("--allow-remote-images", action="store_true", default=False,
                         help="원격 http(s) image_url 다운로드 허용 (기본 비활성 — SSRF 방지)")
+    parser.add_argument("--decision-engine", type=str, default="off", choices=["off", "llm", "kev"],
+                        help="/v1/systemone 판단 엔진: off(기본) | llm(로드된 모델의 선택지 확률) | kev(사이드카 전달)")
+    parser.add_argument("--kev-url", type=str, default="http://127.0.0.1:8009",
+                        help="kev 엔진이 전달할 Kev 사이드카 주소 (기본값: http://127.0.0.1:8009)")
+    parser.add_argument("--decision-temperature", type=float, default=1.0,
+                        help="llm 엔진 확률 보정 온도 — 1보다 크면 확률이 완만해짐 (기본값: 1.0)")
     args = parser.parse_args()
 
     model_id = args.model
@@ -1526,7 +1762,10 @@ def main():
     APC_DIR = args.apc_dir
     APC_MAX_GB = args.apc_max_gb
     ALLOW_REMOTE_IMAGES = args.allow_remote_images
-    LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+    DECISION_ENGINE = args.decision_engine
+    KEV_URL = args.kev_url
+    DECISION_TEMPERATURE = args.decision_temperature
+    LOG_DIR =os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
     os.makedirs(LOG_DIR, exist_ok=True)
     if APC_ENABLED and APC_DIR:
         os.makedirs(APC_DIR, exist_ok=True)
@@ -1567,6 +1806,10 @@ def main():
         print(f"   ♻️  APC: ON ({'disk: ' + APC_DIR + cap if APC_DIR else '메모리 전용'})")
     else:
         print(f"   ♻️  APC: OFF")
+    if DECISION_ENGINE == "llm":
+        print(f"   🧭 판단: /v1/systemone (llm — 로드된 모델의 선택지 확률, T={DECISION_TEMPERATURE:g})")
+    elif DECISION_ENGINE == "kev":
+        print(f"   🧭 판단: /v1/systemone (kev → {KEV_URL})")
     print(f"   📝 로깅: {LOG_DIR}/")
     print(f"   종료: Ctrl+C")
     print()
