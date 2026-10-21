@@ -179,7 +179,8 @@ local-llm/
 │   ├── test_api_server.py                # API 서버 테스트
 │   ├── test_tool_calling.py              # tool calling / thinking 테스트
 │   ├── test_stats.py                     # 대시보드 집계 테스트
-│   └── test_proxy.py                     # 프록시 테스트 (전체 108개)
+│   ├── test_decisions.py                 # /v1/systemone 판단 엔드포인트 테스트
+│   └── test_proxy.py                     # 프록시 테스트 (전체 126개)
 ├── local-llm-guide-2026.md               # 모델 비교 가이드 문서
 ├── .venv/                                # Python 가상환경
 └── logs/                                 # 요청/응답 JSONL 로그 (자동 생성)
@@ -596,7 +597,7 @@ curl -s "localhost:8080/api/stats?days=30" | jq '.duration_ms'
 ./decision-server.sh 0.8b         # 가장 작음, 정확도 낮음
 ./decision-server.sh 9b 9009      # 더 큰 모델, 포트 지정
 ./decision-server.sh --setup      # 설치만 (kev를 .kev/에 클론 + uv sync)
-KEV_API_KEY=... ./decision-server.sh --host 0.0.0.0   # 외부 노출(Tailscale 등) 시 Bearer 인증
+KEV_API_KEY=... ./decision-server.sh --host 0.0.0.0   # 루프백이 아니면 키 필수 (없으면 거부)
 ```
 
 [uv](https://docs.astral.sh/uv/)가 필요합니다(kev는 Python 3.13 고정 — torch에 3.14 휠이 없음).
@@ -615,6 +616,10 @@ curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
 # → {"answers": {"action": {"choice": "...", "probabilities": {...}, "confidence": ...}, "requested": {"type": "noul", "noul": ...}}, ...}
 ```
 
+서버는 평문 HTTP라 Bearer 키도 평문으로 오갑니다 — 암호화된 망(Tailscale) 안에서만 열거나,
+127.0.0.1에 두고 TLS 종단 프록시 뒤에 두세요. Kev 서버 코드는 `v1.0` 가중치와 함께 `kev-1.0` 릴리스로
+고정됩니다.
+
 호스팅 Jev도 요청은 똑같습니다: `https://openrouter.ai/api/v1/systemone`, `"model": "typesafe/jev-1.14"`,
 OpenRouter 키 (호출당 약 $0.00002, 출력 무료).
 
@@ -630,6 +635,32 @@ OpenRouter 키 (호출당 약 $0.00002, 출력 무료).
 Kev 모델 카드는 **영어 전용**이라고 명시합니다 — 지시문·선택지 설명은 영어로, 내용은 그대로 두고, 임계값을
 믿기 전에 자기 데이터로 재보세요. 64GB 맥이면 27B 채팅 서버(~34GB) 옆에 Kev-4B가 같이 올라갈 것으로
 예상합니다(미측정). 크기: 0.8B 모든 맥 · 4B 32GB 권장(16GB는 스왑으로 동작) · 9B 32GB 이상.
+
+### 채팅 서버 내장 엔드포인트 (`--decide`)
+
+채팅 서버가 자기 포트에서 같은 `/v1/systemone` 요청에 답할 수 있습니다 — 이미 `:8080`을 쓰는 클라이언트는
+주소를 하나 더 두지 않고 판단을 받습니다. **기본은 꺼짐**입니다.
+
+```bash
+./llm-server.sh --decide       # "llm" 엔진: 로드된 채팅 모델이 선택지 확률을 매김
+./llm-server.sh --decide-kev   # "kev" 엔진: Kev 사이드카로 전달 (./decision-server.sh 먼저 실행)
+# 직접: python llm-api-server.py --decision-engine llm|kev [--kev-url URL] [--decision-temperature T]
+```
+
+`llm` 엔진 동작: 질문마다 `STATE / QUESTION / OPTIONS (A, B, C…)`를 모델의 채팅 템플릿(thinking 끔)으로
+만들고, **프리필 1회 후 첫 토큰 로그확률만 읽어서**(생성·MTP 드래프트 없음, 채팅 프롬프트 캐시 안 건드림)
+선택지 글자에 실린 확률을 재정규화합니다. `noul` = P(예), `choice` = 최고 확률 선택지와 선택지별 확률,
+`score` = 확률 가중 레벨 인덱스, `confidence` = 최고 선택지 확률. 답마다 `coverage`도 붙습니다 — 전체
+어휘 확률 중 선택지 글자에 실린 비율로, 1보다 한참 낮으면 모델이 "글자 하나로 답" 형식을 안 따른 것이니
+그 답은 믿지 마세요. 채팅 요청과 같은 GPU 큐를 씁니다 (큐가 차면 `429`).
+
+M4 16GB에서 `mlx-community/Qwen3.5-4B-MLX-4bit`로 시험한 결과 (27B는 여기서 못 올림):
+- 질문 3개 2.3초, 2개 1.0초, `coverage` 0.998~0.999
+- log-softmax를 float32로 계산(`logits_processors`) — mlx-vlm 기본은 bf16이라 선택지 확률 합이 1.02가
+  됐었음. 로짓 자체는 여전히 bf16이라 거의 같은 두 선택지가 정확히 같게 나올 수 있음 (예: `noul: 0.5`)
+- 확률이 **보정돼 있지 않음** (보정을 학습한 Jev/Kev와 다름): 라벨 데이터로 `--decision-temperature`와
+  임계값을 맞출 것
+- 같은 한국어 이벤트 8건: **Jev 8/8 · 이 엔진(4B) 6/8 · Kev-4B 5/8**. 27B는 더 나을 것으로 예상(미측정)
 
 ---
 
@@ -1098,7 +1129,7 @@ llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # 두
 ## 테스트
 
 ```bash
-# 전체 테스트 (108개, mock 모델 — GPU 불필요)
+# 전체 테스트 (126개, mock 모델 — GPU 불필요)
 .venv/bin/python -m pytest tests/ -v
 ```
 
@@ -1119,6 +1150,9 @@ llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # 두
 | Stream | stream_chunks | role → content → finish_reason → [DONE] |
 | RateLimit | queue_full | 큐 초과 시 429 응답 |
 | Logging | log_file_created | JSONL 로그 파일 생성 + 필드 검증 |
+| Decision | parse_decision_request | System One 요청 검증 (noul / choice / score, 422 경우) |
+| Decision | option_probs | 첫 토큰 logprobs → 선택지 확률 재정규화, coverage, 온도 |
+| Decision | systemone (llm / kev / off) | 타입별 답, 질문당 프리필 1회·float32, Kev 전달, 404/429/502 |
 
 ---
 

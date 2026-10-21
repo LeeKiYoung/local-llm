@@ -17,6 +17,8 @@
 #   ./llm-server.sh --no-mtp     # MTP speculative decoding 비활성화
 #   ./llm-server.sh --no-apc     # APC prefix caching 비활성화
 #   ./llm-server.sh --no-dsh     # dsh 웹 UI 자동 실행 안 함
+#   ./llm-server.sh --decide     # /v1/systemone 판단 엔드포인트 (로드된 모델의 선택지 확률)
+#   ./llm-server.sh --decide-kev # /v1/systemone → Kev 사이드카 전달 (./decision-server.sh 먼저 실행)
 #
 # Thinking 제어:
 #   기본 Thinking OFF. --think 옵션으로 기본 ON.
@@ -63,6 +65,7 @@ USE_THINK=false
 NO_MTP=false
 NO_APC=false
 NO_DSH=false
+DECISION=off
 
 switch_profile() {
   resolve_model_config
@@ -178,6 +181,12 @@ for arg in "$@"; do
     --no-dsh)
       NO_DSH=true
       ;;
+    --decide)
+      DECISION=llm
+      ;;
+    --decide-kev)
+      DECISION=kev
+      ;;
     *)
       if [[ "$arg" =~ ^[0-9]+$ ]]; then
         PORT="$arg"
@@ -202,6 +211,9 @@ elif ! echo "$MODEL" | grep -qiE "Qwen3\.8-27B"; then
 fi
 if [ "$NO_APC" = true ]; then
   SERVER_ARGS+=(--no-apc)
+fi
+if [ "$DECISION" != off ]; then
+  SERVER_ARGS+=(--decision-engine "$DECISION")
 fi
 # --apc-dir는 넘기지 않는다 = 메모리 전용.
 # Qwen3.6-27B는 hybrid(linear+full attention)라 APC가 block이 아닌 exact 모드로 동작하고,
@@ -245,6 +257,10 @@ if [ "$NO_APC" = false ]; then
 else
   echo "   ♻️  APC: OFF"
 fi
+case "$DECISION" in
+  llm) echo "   🧭 판단: /v1/systemone (로드된 모델의 선택지 확률)" ;;
+  kev) echo "   🧭 판단: /v1/systemone → Kev 사이드카 (http://127.0.0.1:8009)" ;;
+esac
 echo "   📝 로깅: ON (logs/ 폴더에 저장)"
 
 # dsh 웹 UI 자동 실행 (설치돼 있으면) — API 서버 종료 시 함께 종료
