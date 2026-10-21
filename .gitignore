@@ -12,3 +12,6 @@ logs/
 .coverage
 .claude/
 .claudeignore
+
+# Kev 판단모델 체크아웃 (decision-server.sh)
+.kev/

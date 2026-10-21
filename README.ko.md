@@ -171,6 +171,7 @@ local-llm/
 ├── llm-server.sh                         # API 서버 실행
 ├── llm-api-server.py                     # FastAPI 커스텀 API 서버 (핵심)
 ├── llm-proxy.py                          # 투명 로깅 프록시 (선택적 사용)
+├── decision-server.sh                    # Kev 판단모델 사이드카 (Jev 호환, :8009)
 ├── profiles/
 │   ├── config-qwen36-27b-262k.json       # 기본 프로필 (262K, Qwen3.6-27B)
 │   └── config-qwen36-27b-1m.json         # 확장 프로필 (1M YaRN, Qwen3.6-27B)
@@ -574,6 +575,61 @@ curl -s "localhost:8080/api/stats?days=30" | jq '.duration_ms'
 > `days`는 **롤링 24시간이 아니라 날짜 파일 단위**입니다. `days=1`은 오늘 자
 > `logs/YYYY-MM-DD.jsonl` 하나만 읽으므로, 자정 직후에는 어제 밤 요청이 잡히지 않습니다.
 > 그 구간까지 보려면 `days=2` 이상을 쓰세요.
+
+---
+
+## 판단모델 사이드카 (Jev 호환 Kev)
+
+**판단모델(decision model)** 은 글을 쓰지 않습니다. `state`와 타입 있는 질문을 보내면 한 번의
+포워드 패스로 선택지별 확률을 돌려줍니다. TypeSafe의 [Jev](https://docs.typesafe.ai)는 호스팅 전용(오픈
+웨이트 없음)이고, [Kev](https://github.com/jaredpalmer/kev)(Apache-2.0)는 Jev와 비슷한 오픈 모델
+패밀리(Qwen3.5 베이스 + LoRA 어댑터 + 포인터 헤드)로 **같은 System One API**(`POST /v1/systemone`)를
+제공합니다. Jev용으로 짠 클라이언트 코드는 주소만 바꾸면 그대로 동작합니다.
+
+코드가 같은 닫힌 질문을 반복해서 묻고 확신도로 분기하는 자리에 씁니다 — 라우팅, "사용자가 이 명령을
+정말 요청했나?", "이 '완료' 보고가 도구 결과로 뒷받침되나?", 분류 등. (#27의 재검토 조건 — 이제 Hermes
+에이전트 플러그인이 이런 판단 지점 3곳을 기록합니다.) 포트 8009의 **별도 사이드카**라
+`llm-server.sh` 채팅 서버(8080)와는 무관합니다.
+
+```bash
+./decision-server.sh              # Kev-4B (기본), 127.0.0.1:8009
+./decision-server.sh 0.8b         # 가장 작음, 정확도 낮음
+./decision-server.sh 9b 9009      # 더 큰 모델, 포트 지정
+./decision-server.sh --setup      # 설치만 (kev를 .kev/에 클론 + uv sync)
+KEV_API_KEY=... ./decision-server.sh --host 0.0.0.0   # 외부 노출(Tailscale 등) 시 Bearer 인증
+```
+
+[uv](https://docs.astral.sh/uv/)가 필요합니다(kev는 Python 3.13 고정 — torch에 3.14 휠이 없음).
+처음 실행 시 베이스 모델을 내려받습니다(4B ≈ 9GB).
+
+```bash
+curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "kev-latest",
+  "state": {"request": "#250 PR 리뷰만 해줘, 머지는 내가 할게", "command": "gh pr merge 250 --squash"},
+  "questions": {
+    "action": {"type": "choice", "instructions": "How should the agent handle this command?",
+               "criteria": {"run": "Requested, run it", "ask": "Ask the user first", "reply": "Not requested, answer in words"}},
+    "requested": {"type": "noul", "instructions": "Did the user ask for this exact action?"}
+  }
+}'
+# → {"answers": {"action": {"choice": "...", "probabilities": {...}, "confidence": ...}, "requested": {"type": "noul", "noul": ...}}, ...}
+```
+
+호스팅 Jev도 요청은 똑같습니다: `https://openrouter.ai/api/v1/systemone`, `"model": "typesafe/jev-1.14"`,
+OpenRouter 키 (호출당 약 $0.00002, 출력 무료).
+
+### M4 맥미니 16GB 실측 (2026-10-21, Kev-4B@v1.0, MLX bf16)
+
+| 항목 | 결과 |
+|---|---|
+| 메모리 | 상시 8.6~9.9GB, **피크 15GB** (스왑 1.4GB) — 16GB에선 상주시키지 말고 필요할 때만 띄울 것 |
+| 로드 (모델 캐시 후) | 약 60초 |
+| 지연 | 첫 요청 18.7초(워밍업), 이후 요청당 0.5~1.6초 |
+| 한국어 정확도 (한국어 KB 이벤트 8건, 강한 LLM 채점기 정답 기준) | **Jev 8/8 (Brier 0.099) vs Kev 5/8 (Brier 0.408)**, Kev는 확신 0.8 이상 답이 0건 |
+
+Kev 모델 카드는 **영어 전용**이라고 명시합니다 — 지시문·선택지 설명은 영어로, 내용은 그대로 두고, 임계값을
+믿기 전에 자기 데이터로 재보세요. 64GB 맥이면 27B 채팅 서버(~34GB) 옆에 Kev-4B가 같이 올라갈 것으로
+예상합니다(미측정). 크기: 0.8B 모든 맥 · 4B 32GB 권장(16GB는 스왑으로 동작) · 9B 32GB 이상.
 
 ---
 

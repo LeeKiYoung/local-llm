@@ -171,6 +171,7 @@ local-llm/
 ├── llm-server.sh                         # API server launcher
 ├── llm-api-server.py                     # FastAPI custom API server (core)
 ├── llm-proxy.py                          # Transparent logging proxy (optional)
+├── decision-server.sh                    # Kev decision model sidecar (Jev-compatible, :8009)
 ├── profiles/
 │   ├── config-qwen36-27b-262k.json       # Default profile (262K, Qwen3.6-27B)
 │   └── config-qwen36-27b-1m.json         # Extended profile (1M YaRN, Qwen3.6-27B)
@@ -574,6 +575,63 @@ curl -s "localhost:8080/api/stats?days=30" | jq '.duration_ms'
 > `days` counts **date files, not rolling 24-hour windows**. `days=1` reads only today's
 > `logs/YYYY-MM-DD.jsonl`, so right after midnight last night's requests won't appear.
 > Use `days=2` or more to cover that window.
+
+---
+
+## Decision Model Sidecar (Jev-compatible Kev)
+
+A **decision model** does not write text: you send a `state` plus typed questions and it returns a
+probability for each option in one forward pass. TypeSafe's [Jev](https://docs.typesafe.ai) is
+hosted-only (no open weights). [Kev](https://github.com/jaredpalmer/kev) (Apache-2.0) is an open
+Jev-like family (Qwen3.5 base + LoRA adapter + pointer head) that serves **the same System One API**
+(`POST /v1/systemone`), so client code written for Jev works by changing only the base URL.
+
+It is useful where code asks the same closed question over and over and branches on the confidence —
+routing, "did the user actually ask for this command?", "is this 'done' claim backed by the tool
+output?", classification. (This is the revisit condition from #27; a Hermes agent plugin now logs
+decisions at three such points.) It is a **separate sidecar** on port 8009 and does not touch the
+`llm-server.sh` chat server on 8080.
+
+```bash
+./decision-server.sh              # Kev-4B (default) on 127.0.0.1:8009
+./decision-server.sh 0.8b         # smallest, low accuracy
+./decision-server.sh 9b 9009      # larger model, custom port
+./decision-server.sh --setup      # install only (clones kev into .kev/, uv sync)
+KEV_API_KEY=... ./decision-server.sh --host 0.0.0.0   # expose (e.g. Tailscale) with bearer auth
+```
+
+Requires [uv](https://docs.astral.sh/uv/) (kev pins Python 3.13; torch has no 3.14 wheels). The first
+run downloads the base model (4B ≈ 9GB).
+
+```bash
+curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "kev-latest",
+  "state": {"request": "Review PR #250 only, I will merge it myself", "command": "gh pr merge 250 --squash"},
+  "questions": {
+    "action": {"type": "choice", "instructions": "How should the agent handle this command?",
+               "criteria": {"run": "Requested, run it", "ask": "Ask the user first", "reply": "Not requested, answer in words"}},
+    "requested": {"type": "noul", "instructions": "Did the user ask for this exact action?"}
+  }
+}'
+# → {"answers": {"action": {"choice": "...", "probabilities": {...}, "confidence": ...}, "requested": {"type": "noul", "noul": ...}}, ...}
+```
+
+Hosted Jev uses the identical request: `https://openrouter.ai/api/v1/systemone` with
+`"model": "typesafe/jev-1.14"` and an OpenRouter key (about $0.00002 per call, output is free).
+
+### Measured on an M4 Mac mini 16GB (2026-10-21, Kev-4B@v1.0, MLX bf16)
+
+| Item | Result |
+|---|---|
+| Memory | steady 8.6–9.9GB, **peak 15GB** (1.4GB swap) — start it on demand, don't keep it resident on 16GB |
+| Load (model cached) | ~60s |
+| Latency | first request 18.7s (warm-up), then 0.5–1.6s per request |
+| Korean accuracy (8 Korean KB events, labels by a strong LLM grader) | **Jev 8/8 (Brier 0.099) vs Kev 5/8 (Brier 0.408)**, Kev had no answer ≥0.8 confidence |
+
+Kev's model card says **English only**; write instructions/criteria in English and keep the content
+as-is, and measure on your own data before trusting a threshold. On a 64GB Mac, Kev-4B should fit next
+to the 27B chat server (~34GB) — expected, not measured. Sizes: 0.8B any Mac · 4B 32GB recommended
+(works on 16GB with swap) · 9B 32GB+.
 
 ---
 
