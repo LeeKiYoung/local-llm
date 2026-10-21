@@ -1248,7 +1248,8 @@ def parse_decision_request(data: dict) -> dict:
             options = [("yes", "yes"), ("no", "no")]
         elif qtype == "choice":
             if isinstance(criteria, dict) and criteria:
-                options = [(str(k), str(v)) for k, v in criteria.items()]
+                # TypeSafe SDK는 설명 없는 선택지를 {"calm": None}으로 보낸다
+                options = [(str(k), str(k) if v is None else str(v)) for k, v in criteria.items()]
             elif isinstance(criteria, list) and criteria:
                 options = [(str(c), str(c)) for c in criteria]
             else:
@@ -1344,6 +1345,8 @@ def run_decision(parsed):
             answers[name] = {**make_decision_answer(q, probs), "coverage": round(coverage, 4)}
             prompt_tokens += first.prompt_tokens or 0
     finally:
+        # 채팅 경로와 같은 순서 — 채팅 KV가 lazy인 채로 clear_cache()하면 다음 채팅 요청에서 command buffer 충돌
+        _eval_kv_cache(prompt_cache_state)
         mx.synchronize()
         mx.clear_cache()
     return answers, prompt_tokens

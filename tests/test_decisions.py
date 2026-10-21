@@ -111,6 +111,15 @@ class TestParseDecisionRequest:
         assert p["questions"]["tone"]["options"] == [("calm", "neutral"), ("angry", "upset")]
         assert '"msg": "hi"' in p["state"]
 
+    def test_choice_none_description_uses_key(self):
+        # TypeSafe SDK의 Choice(criteria={"calm": None, ...}) 형식
+        p = server_module.parse_decision_request({
+            "state": "x", "questions": {"tone": {"type": "choice", "criteria": {"calm": None, "angry": None}}},
+        })
+        assert p["questions"]["tone"]["options"] == [("calm", "calm"), ("angry", "angry")]
+        prompt = server_module._decision_messages("x", p["questions"]["tone"])[1]["content"]
+        assert "A) calm\nB) angry" in prompt and "None" not in prompt
+
     def test_noul_has_yes_no_and_appends_criteria(self):
         p = server_module.parse_decision_request({
             "state": "x", "questions": {"q": {"type": "noul", "instructions": "Billing?", "criteria": "mentions money"}},

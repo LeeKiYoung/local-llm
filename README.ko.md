@@ -661,6 +661,9 @@ M4 16GB에서 `mlx-community/Qwen3.5-4B-MLX-4bit`로 시험한 결과 (27B는 �
 - 확률이 **보정돼 있지 않음** (보정을 학습한 Jev/Kev와 다름): 라벨 데이터로 `--decision-temperature`와
   임계값을 맞출 것
 - 같은 한국어 이벤트 8건: **Jev 8/8 · 이 엔진(4B) 6/8 · Kev-4B 5/8**. 27B는 더 나을 것으로 예상(미측정)
+- 공식 TypeSafe Python SDK가 그대로 동작 (`TypeSafeClient(base_url="http://127.0.0.1:8080")`, noul / choice /
+  score 파싱 확인). 온도 0 채팅 응답은 판단 요청을 사이사이 끼워도 글자 하나 다르지 않음
+- 27B + MTP + APC에서 채팅과 섞어 돌린 검증은 아직 안 함 (64GB 맥 필요)
 
 ---
 

@@ -667,6 +667,10 @@ Notes from testing on an M4 16GB with `mlx-community/Qwen3.5-4B-MLX-4bit` (the 2
   `--decision-temperature` and your thresholds on labeled data.
 - the same 8 Korean events: **Jev 8/8 · this engine with the 4B 6/8 · Kev-4B 5/8**. The 27B should do
   better (not measured).
+- works with the official TypeSafe Python SDK unchanged (`TypeSafeClient(base_url="http://127.0.0.1:8080")`,
+  noul / choice / score parsed); chat replies at temperature 0 are byte-identical with and without
+  decision calls interleaved
+- not yet run with the 27B + MTP + APC interleaved with chat traffic (needs a 64GB Mac)
 
 ---
 
