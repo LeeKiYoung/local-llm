@@ -649,6 +649,27 @@ talks to `:8080` gets decisions without another base URL. It is **off by default
 # directly: python llm-api-server.py --decision-engine llm|kev [--kev-url URL] [--decision-temperature T]
 ```
 
+**What "sidecar" means here.** Like the passenger car bolted to a motorcycle: a small helper server
+that runs *next to* the main one as its own process. The main server is the chat server (`llm-server.sh`,
+the 27B on `:8080`); the sidecar is the Kev decision server (`decision-server.sh`, `:8009`). It has its own
+memory and is started and stopped separately.
+
+**`--decide` vs `--decide-kev`.** Both answer decision requests at the same `:8080/v1/systemone`, in the
+same format — a client can't tell them apart. **Only the model that makes the decision differs.**
+
+| | `--decide` (engine `llm`) | `--decide-kev` (engine `kev`) |
+|---|---|---|
+| Who decides | **the chat model that is already loaded (27B)** | **the Kev sidecar** (a dedicated 4B decision model) |
+| How | shows the 27B options A/B/C and reads how likely each first letter is | the chat server forwards the request to Kev (`:8009`) and returns its answer |
+| Extra memory | none | ~10GB for Kev |
+| Korean | expected strong with the 27B (6/8 when tested with a 4B) | weak (5/8 — Kev is English-only) |
+| Calibrated probabilities | no — fit a temperature/thresholds on labeled data | yes — trained for calibration |
+| Before starting | nothing | start `./decision-server.sh` first |
+
+In one line: `--decide` lets the big model take on decisions too; `--decide-kev` hands them to a small
+decision-only model running beside it. For Korean on a 64GB Mac, `--decide` is the likely better pick —
+just remember its probabilities aren't calibrated.
+
 How the `llm` engine works: for each question it renders `STATE / QUESTION / OPTIONS (A, B, C…)` with
 the model's chat template (thinking off), runs **one prefill and reads the first-token log-probabilities**
 (no generation, no MTP draft, chat prompt cache untouched), and renormalizes the probability mass on the
