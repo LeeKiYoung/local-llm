@@ -254,6 +254,8 @@ if [ "$NO_DSH" = false ] && command -v dsh >/dev/null 2>&1; then
   LOCAL_LLM_API_KEY=local dsh web > "$SCRIPT_DIR/logs/dsh-web.log" 2>&1 &
   DSH_PID=$!
   echo "   🤖 dsh 웹 UI: http://127.0.0.1:3080 (에이전트 질문창, 서버와 함께 종료)"
+elif [ "$NO_DSH" = false ]; then
+  echo "   ⚠️  dsh 웹 UI: 건너뜀 — PATH에 dsh 없음 (Node 버전 바뀌었으면: npm install -g @deepseek-ai/dsh)"
 fi
 
 echo "   종료: Ctrl+C"
