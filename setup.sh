@@ -136,6 +136,8 @@ fi
 # 6. 런타임 의존성 설치 (requirements-runtime.txt가 source of truth — #24)
 #    mlx-vlm 고정: 0.6.5부터 APC(prefix caching), 0.6.8에 Qwen MRoPE 위치 수정,
 #    0.6.12에 Qwen3.5 계열 디코드/structured output 수정, 0.6.13에 APC prefix 재사용·스트림 버퍼 수정 포함.
+#    0.8.0: qwen3_5 prefill/decode 커널 개선(실측 decode +11~26%, 피크 -4GB). mlx 0.32.4와 짝으로 올릴 것.
+#    0.7.9+는 미지정 샘플링 값을 generation_config.json으로 채움 → 서버가 top_k=0을 명시한다.
 #    transformers 고정: 채팅 템플릿(enable_thinking, <think> prefix 주입) 동작이
 #    strip_thinking() 로직과 결합돼 있어 버전이 흔들리면 조용히 깨진다.
 echo ""

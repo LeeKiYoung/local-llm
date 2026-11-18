@@ -49,7 +49,7 @@ tool calling(function calling)을 지원해 dsh 같은 에이전트 하네스도
 
 ### Qwen3.8-Flash-Next (2026-08-26 공개) — 현재 미채택
 
-Qwen4 아키텍처 프리뷰. MoE 125B / 활성 6B + n-gram 임베딩 51B (`model_type=qwen4_exp`). 공개 벤치 전 항목에서 Qwen3.8-27B를 앞서지만(DeepSWE 58.7 vs 42.2, JobBench 55.7 vs 33.4) **64GB에 들어가지 않는다**: 가장 작은 MLX 변환본이 디스크 68GB, 공식 4-bit는 112GB, mlx-vlm 0.7.0rc0의 external PLE 스토리지(n-gram 테이블 SSD 상주)를 써도 상주 메모리 약 72GB. mlx-vlm 0.6.17 이상 필요(MTP는 0.7.0rc0에만), 이 프로젝트는 0.6.13. 재검토 조건은 `TODO.md` §4 참고.
+Qwen4 아키텍처 프리뷰. MoE 125B / 활성 6B + n-gram 임베딩 51B (`model_type=qwen4_exp`). 공개 벤치 전 항목에서 Qwen3.8-27B를 앞서지만(DeepSWE 58.7 vs 42.2, JobBench 55.7 vs 33.4) **64GB에 들어가지 않는다**: 가장 작은 MLX 변환본이 디스크 68GB, 공식 4-bit는 112GB, mlx-vlm 0.7.0rc0의 external PLE 스토리지(n-gram 테이블 SSD 상주)를 써도 상주 메모리 약 72GB. mlx-vlm 0.6.17 이상 필요(MTP는 0.7.0rc0에만), 이 프로젝트는 0.8.0. 재검토 조건은 `TODO.md` §4 참고.
 
 ### Qwen3.6 → Qwen3.8 전환 (2026-08-18, 현재)
 
@@ -62,7 +62,7 @@ Qwen4 아키텍처 프리뷰. MoE 125B / 활성 6B + n-gram 임베딩 51B (`mode
 | **컨텍스트** | 262K / 1M (YaRN) | 262K / 1M (YaRN 설정 동일 적용, 3.8 실측 미완) |
 | **Tool calling** | 미검증 | ✅ 실측 검증 (dsh E2E 포함) |
 | **Thinking** | ✅ | ✅ (전환 직후 무음 no-op 버그 있었음 → 2026-08-18 수정) |
-| **런타임** | mlx-vlm 0.6.12 | mlx-vlm 0.6.13 (Qwen3.5 계열 디코드 수정 포함) |
+| **런타임** | mlx-vlm 0.6.12 | 전환 당시 mlx-vlm 0.6.13 → 현재 **0.8.0** (2026-11-18 업그레이드) |
 
 bf16(54GB)은 64GB Mac에서 wired memory limit 때문에 비실용이라 8bit를 선택.
 아키텍처가 동일해 코드 변경 없이 전환됐고, 속도를 조금 내주는 대신 상위 세대 품질을 얻는 트레이드오프.
@@ -125,7 +125,7 @@ cd local-llm
 `setup.sh`가 자동으로:
 1. Apple Silicon / Python / 메모리 확인
 2. 메모리에 맞는 모델 선택 메뉴 표시
-3. 가상환경 생성 + **mlx-vlm==0.6.13 / mlx==0.32.0** (Qwen MTP/KV cache/MRoPE 수정, APC 포함) + FastAPI + uvicorn 설치
+3. 가상환경 생성 + **mlx-vlm==0.8.0 / mlx==0.32.4** (Qwen MTP/KV cache/MRoPE 수정, APC 포함) + FastAPI + uvicorn 설치
 4. 선택한 모델 다운로드 + 스크립트에 자동 반영
 
 | # | 모델 | 메모리 | 특징 |
@@ -761,8 +761,10 @@ non-Qwen3.8 프로필(`qwen36`, `qwen36-fast`, `supergemma4*`)은 드래프터�
 
 ### 요구사항
 
-- mlx-vlm **0.6.13** 고정 (Qwen MTP prefill, quantized KV cache, MRoPE 위치 수정 포함)
-- `setup.sh`가 자동으로 설치: `pip install mlx-vlm==0.6.13 mlx==0.32.0`
+- mlx-vlm **0.8.0** 고정 (Qwen MTP prefill, quantized KV cache, MRoPE 위치 수정, qwen3_5 prefill/decode 커널 개선 포함)
+- `setup.sh`가 자동으로 설치: `pip install mlx-vlm==0.8.0 mlx==0.32.4` (mlx는 mlx-vlm과 짝으로만 올릴 것)
+- 0.6.13 → 0.8.0 실측 (2026-11-18, M5 Pro 64GB, 무검열 8-bit + MTP, 서버 보고 decode tok/s): 코드 24.9 → **27.7**, 한국어 산문 11.6 → **14.6**, 이미지 17.4 → **19.3**, 피크 메모리 36 → **32GB**
+- 0.7.9부터 mlx-vlm이 미지정 샘플링 값을 체크포인트 `generation_config.json`(Qwen3.8: `top_k=20`)으로 채운다. 서버는 `top_k=0`을 명시해 이전 동작을 유지한다
 - 구버전 설치 시 서버 시작 시 자동 감지 후 graceful fallback (MTP 비활성화 경고 출력)
 
 ---

@@ -1018,6 +1018,9 @@ def _sampling_kwargs(params):
     return {
         "temperature": params["temperature"],
         "top_p": params["top_p"],
+        # mlx-vlm 0.7.9+는 top_k 미지정 시 generation_config.json 값(Qwen3.8: 20)으로 채운다.
+        # 0을 명시해 업그레이드 전 동작(제한 없음)을 유지한다.
+        "top_k": 0,
         "seed": seed,
         "repetition_penalty": params["repetition_penalty"],
         "presence_penalty": params["presence_penalty"] or None,

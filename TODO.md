@@ -84,7 +84,7 @@ dsh는 본 응답과 부수 요청을 병렬로 던지므로 상시 발생.
 
 - mlx-vlm 0.7.0rc0의 external PLE 스토리지(n-gram 테이블 SSD 상주)로도 상주 메모리 71.68GB (PR #2045).
 - 48GB Mac 사례(slotstream)는 expert까지 SSD 오프로드하는 별도 Swift 런타임. 12 tok/s, 70~80K 컨텍스트 문제, SSD 마모 우려. 현재 27B MTP ON(~26 tok/s)보다 느리다.
-- 설치된 mlx-vlm 0.6.13. Flash-Next 지원은 0.6.17부터, MTP/PLE 외부 스토리지는 0.7.0rc0. 지금 올리면 `qwen3_5` MTP 경로만 위험.
+- 설치된 mlx-vlm 0.8.0 (2026-11-18 업그레이드, `qwen3_5` MTP 경로 실측 검증 완료). Flash-Next 지원(0.6.17+)과 MTP/PLE 외부 스토리지(0.7.0rc0+) 모두 포함되므로 런타임은 더 이상 걸림돌이 아니다 — 남은 제약은 메모리.
 
 **재검토 조건 (하나라도 충족 시):**
 1. mlx-vlm 0.7.0 정식 릴리스 + 64GB Mac 상주 메모리 실측 보고

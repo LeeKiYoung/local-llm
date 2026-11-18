@@ -49,7 +49,7 @@ Loading two models at once is not possible (exceeds memory). Switch by restartin
 
 ### Qwen3.8-Flash-Next (released 2026-08-26) — not adopted for now
 
-A Qwen4-architecture preview: 125B MoE with 6B active, plus a 51B n-gram embedding table (`model_type=qwen4_exp`). It beats Qwen3.8-27B on every published benchmark (DeepSWE 58.7 vs 42.2, JobBench 55.7 vs 33.4), but **it does not fit in 64GB**: the smallest MLX conversion is 68GB on disk, the official 4-bit is 112GB, and even mlx-vlm 0.7.0rc0's external PLE storage (n-gram table on SSD) leaves ~72GB resident. Requires mlx-vlm ≥ 0.6.17 (MTP only in 0.7.0rc0); this project is on 0.6.13. Revisit conditions are tracked in `TODO.md` §4.
+A Qwen4-architecture preview: 125B MoE with 6B active, plus a 51B n-gram embedding table (`model_type=qwen4_exp`). It beats Qwen3.8-27B on every published benchmark (DeepSWE 58.7 vs 42.2, JobBench 55.7 vs 33.4), but **it does not fit in 64GB**: the smallest MLX conversion is 68GB on disk, the official 4-bit is 112GB, and even mlx-vlm 0.7.0rc0's external PLE storage (n-gram table on SSD) leaves ~72GB resident. Requires mlx-vlm ≥ 0.6.17 (MTP only in 0.7.0rc0); this project is on 0.8.0. Revisit conditions are tracked in `TODO.md` §4.
 
 ### Qwen3.6 → Qwen3.8 Switch (2026-08-18, current)
 
@@ -62,7 +62,7 @@ A Qwen4-architecture preview: 125B MoE with 6B active, plus a 51B n-gram embeddi
 | **Context** | 262K / 1M (YaRN) | 262K / 1M (same YaRN settings applied; 1M not yet measured on 3.8) |
 | **Tool calling** | untested | ✅ verified end-to-end (including dsh E2E) |
 | **Thinking** | ✅ | ✅ (had a silent no-op bug right after the switch → fixed 2026-08-18) |
-| **Runtime** | mlx-vlm 0.6.12 | mlx-vlm 0.6.13 (includes Qwen3.5-family decode fixes) |
+| **Runtime** | mlx-vlm 0.6.12 | mlx-vlm 0.6.13 at switch time → now **0.8.0** (upgraded 2026-11-18) |
 
 bf16 (54GB) is impractical on a 64GB Mac due to the wired memory limit, so 8bit was chosen.
 The architecture is identical, so the switch required no code changes — a trade of a little speed for next-generation quality.
@@ -125,7 +125,7 @@ cd local-llm
 `setup.sh` automatically:
 1. Checks Apple Silicon / Python / memory
 2. Shows a model selection menu matched to your memory
-3. Creates a virtualenv + installs **mlx-vlm==0.6.13 / mlx==0.32.0** (Qwen MTP/KV cache/MRoPE fixes, APC included) + FastAPI + uvicorn
+3. Creates a virtualenv + installs **mlx-vlm==0.8.0 / mlx==0.32.4** (Qwen MTP/KV cache/MRoPE fixes, APC included) + FastAPI + uvicorn
 4. Downloads the chosen model and wires it into the scripts
 
 | # | Model | Memory | Notes |
@@ -769,8 +769,10 @@ Only for comparison or when MTP is not needed.
 
 ### Requirements
 
-- mlx-vlm pinned at **0.6.13** (includes Qwen MTP prefill, quantized KV cache, and MRoPE position fixes)
-- Installed automatically by `setup.sh`: `pip install mlx-vlm==0.6.13 mlx==0.32.0`
+- mlx-vlm pinned at **0.8.0** (includes Qwen MTP prefill, quantized KV cache, MRoPE position fixes, and faster qwen3_5 prefill/decode kernels)
+- Installed automatically by `setup.sh`: `pip install mlx-vlm==0.8.0 mlx==0.32.4` (only upgrade mlx together with mlx-vlm)
+- 0.6.13 → 0.8.0, measured 2026-11-18 on an M5 Pro 64GB (uncensored 8-bit + MTP, server-reported decode tok/s): code 24.9 → **27.7**, Korean prose 11.6 → **14.6**, image 17.4 → **19.3**, peak memory 36 → **32GB**
+- Since 0.7.9, mlx-vlm fills unset sampling options from the checkpoint's `generation_config.json` (Qwen3.8: `top_k=20`). The server passes `top_k=0` explicitly to keep the previous behavior
 - With an older version, the server auto-detects it at startup and falls back gracefully (prints an MTP-disabled warning)
 
 ---
