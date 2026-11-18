@@ -180,7 +180,7 @@ local-llm/
 │   ├── test_tool_calling.py              # tool calling / thinking 테스트
 │   ├── test_stats.py                     # 대시보드 집계 테스트
 │   ├── test_decisions.py                 # /v1/systemone 판단 엔드포인트 테스트
-│   └── test_proxy.py                     # 프록시 테스트 (전체 126개)
+│   └── test_proxy.py                     # 프록시 테스트 (전체 128개)
 ├── local-llm-guide-2026.md               # 모델 비교 가이드 문서
 ├── .venv/                                # Python 가상환경
 └── logs/                                 # 요청/응답 JSONL 로그 (자동 생성)
@@ -1154,7 +1154,7 @@ llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # 두
 ## 테스트
 
 ```bash
-# 전체 테스트 (126개, mock 모델 — GPU 불필요)
+# 전체 테스트 (128개, mock 모델 — GPU 불필요)
 .venv/bin/python -m pytest tests/ -v
 ```
 

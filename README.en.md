@@ -180,7 +180,7 @@ local-llm/
 │   ├── test_tool_calling.py              # tool calling / thinking tests
 │   ├── test_stats.py                     # dashboard aggregation tests
 │   ├── test_decisions.py                 # /v1/systemone decision endpoint tests
-│   └── test_proxy.py                     # proxy tests (126 total)
+│   └── test_proxy.py                     # proxy tests (128 total)
 ├── local-llm-guide-2026.md               # Model comparison guide
 ├── .venv/                                # Python virtualenv
 └── logs/                                 # Request/response JSONL logs (auto-created)
@@ -1162,7 +1162,7 @@ llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # com
 ## Tests
 
 ```bash
-# Full test suite (126 tests, mocked model — no GPU required)
+# Full test suite (128 tests, mocked model — no GPU required)
 .venv/bin/python -m pytest tests/ -v
 ```
 
