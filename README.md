@@ -62,7 +62,7 @@ A Qwen4-architecture preview: 125B MoE with 6B active, plus a 51B n-gram embeddi
 | **Context** | 262K / 1M (YaRN) | 262K / 1M (same YaRN settings applied; 1M not yet measured on 3.8) |
 | **Tool calling** | untested | ✅ verified end-to-end (including dsh E2E) |
 | **Thinking** | ✅ | ✅ (had a silent no-op bug right after the switch → fixed 2026-08-18) |
-| **Runtime** | mlx-vlm 0.6.12 | mlx-vlm 0.6.13 (includes Qwen3.5-family decode fixes) |
+| **Runtime** | mlx-vlm 0.6.12 | mlx-vlm 0.6.13 at switch time → now **0.8.0** (upgraded 2026-11-18) |
 
 bf16 (54GB) is impractical on a 64GB Mac due to the wired memory limit, so 8bit was chosen.
 The architecture is identical, so the switch required no code changes — a trade of a little speed for next-generation quality.

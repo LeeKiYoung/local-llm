@@ -33,7 +33,7 @@ Apple Silicon Mac에서 MLX 기반 로컬 LLM을 OpenAI 호환 API 서버로 실
 - pip - Python package management
 - Lockfile: No explicit lock file (setup.sh pins mlx-vlm and fastapi versions)
 ## Frameworks
-- **MLX** 0.31.1 - Apple Silicon native ML framework (GPU acceleration via Metal)
+- **MLX** 0.32.4 - Apple Silicon native ML framework (GPU acceleration via Metal)
 - **FastAPI** 0.135.2 - Async HTTP API server for OpenAI-compatible endpoints
 - **Uvicorn** 0.42.0 - ASGI server runner for FastAPI
 - **pytest** 9.0.2 - Unit testing framework
