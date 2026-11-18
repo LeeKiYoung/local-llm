@@ -864,10 +864,17 @@ class TestSamplingParams:
         resp = client.post("/v1/chat/completions", json={**body, "stream": True})
         list(resp.iter_lines())
 
-        sampling = {"temperature", "top_p", "seed", "repetition_penalty",
+        sampling = {"temperature", "top_p", "top_k", "seed", "repetition_penalty",
                     "presence_penalty", "frequency_penalty"}
         assert sampling <= non_stream
         assert sampling <= set(captured)
+
+    def test_top_k_pinned_to_zero(self, client):
+        """mlx-vlm 0.7.9+는 top_k 미지정 시 generation_config.json 값(Qwen3.8: 20)을 채운다.
+        0을 명시해 업그레이드 전 동작(top_k 제한 없음)을 유지한다."""
+        client.post("/v1/chat/completions", json={
+            "model": "test-model", "messages": [{"role": "user", "content": "t"}]})
+        assert self._kwargs()["top_k"] == 0
 
 
 # ── seed 자동 생성 (워커 스레드 RNG 미진행 회피) ─────────────────────────────
