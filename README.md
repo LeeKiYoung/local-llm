@@ -1,120 +1,120 @@
 # Local LLM Server (MLX)
 
-[한국어](README.ko.md) | **English**
+**한국어** | [English](README.en.md)
 
-> **Apple Silicon Mac only** (M1/M2/M3/M4/M5)
-> MLX is Apple's native ML framework and only runs on Apple Silicon.
-> NVIDIA GPU / Intel Mac / Windows / Linux are not supported.
+> **Apple Silicon Mac 전용** (M1/M2/M3/M4/M5)
+> MLX는 Apple의 네이티브 ML 프레임워크로, Apple Silicon에서만 동작합니다.
+> NVIDIA GPU / Intel Mac / Windows / Linux는 지원하지 않습니다.
 
-A project that runs local LLMs as an OpenAI-compatible API server on Apple Silicon Macs.
-Connect any OpenAI SDK-compatible client as-is and run inference fully locally.
-Tool calling (function calling) is supported, so agent harnesses like dsh can attach too —
-a single `./llm-server.sh` launches both the API server (:8080) and the dsh agent dashboard (:3080).
+Apple Silicon Mac에서 로컬 LLM을 OpenAI 호환 API 서버로 실행하는 프로젝트.
+OpenAI SDK 호환 클라이언트를 그대로 연결해 완전히 로컬에서 추론하며,
+tool calling(function calling)을 지원해 dsh 같은 에이전트 하네스도 붙습니다 —
+`./llm-server.sh` 하나로 API 서버(:8080)와 dsh 에이전트 대시보드(:3080)가 함께 뜹니다.
 
 ---
 
-## Supported Models
+## 지원 모델
 
-| Model | Launch command | Memory | Speed | Notes |
+| 모델 | 실행 명령 | 메모리 | 속도 | 특징 |
 |------|----------|------:|-----:|------|
-| **Qwen3.8-27B-8bit** (stock) | `./llm-server.sh qwen38` | ~30GB (peak 34GB) | ~25 tok/s³ | Multimodal (images), Thinking OFF by default with per-request ON, preserve_thinking support, mlx-vlm runtime |
-| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) — **default** | `./llm-server.sh` | ~28GB (peak ~36GB) | ~28 tok/s⁶ | Abliterated uncensored, **the default profile**. Same architecture as the stock model: multimodal, tool calling, Thinking control, MTP all preserved. If this checkpoint is not cached, `llm-server.sh` falls back to the stock model. Use `qwen38` for stock |
-| **Qwen3.6-27B-6bit** (previous default) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ ⁵ | Same features as above — for 32–48GB machines |
-| **Qwen3.6-35B-A3B-8bit** (fast profile) | `./llm-server.sh qwen36-fast` | ~37GB | 3–4x⁴ | Multimodal MoE (3B active). For bulk/repetitive work — the 27B dense is higher quality |
-| **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | Uncensored (fine-tuned), stronger tool calls / Korean / code, text only |
-| **SuperGemma4-26B abliterated-multimodal** | `./llm-server.sh supergemma4-vlm`¹ | ~15GB | ~49 tok/s | Uncensored (EGA), image + text input |
+| **Qwen3.8-27B-8bit** (정품) | `./llm-server.sh qwen38` | ~30GB (피크 34GB) | ~25 tok/s³ | 멀티모달(이미지), Thinking 기본 OFF, 요청별 ON 가능, preserve_thinking 지원, mlx-vlm 런타임 |
+| **Qwen3.8-27B Uncensored-8bit** (orcarouter, abliterated) — **기본** | `./llm-server.sh` | ~28GB (피크 ~36GB) | ~28 tok/s⁶ | Abliterated 무검열, **기본 프로필**. 정품과 동일 아키텍처로 멀티모달·툴콜·Thinking 제어·MTP 전부 유지. 이 체크포인트가 캐시에 없으면 `llm-server.sh`가 정품으로 폴백한다. 정품은 `qwen38` |
+| **Qwen3.6-27B-6bit** (이전 기본) | `./llm-server.sh qwen36` | ~23GB | ~12 tok/s³ ⁵ | 위와 동일 기능 — 메모리 32~48GB 환경용 |
+| **Qwen3.6-35B-A3B-8bit** (빠른 프로필) | `./llm-server.sh qwen36-fast` | ~37GB | 3~4배⁴ | MoE(활성 3B) 멀티모달. 대량·반복 작업용 — 품질은 27B dense가 우위 |
+| **SuperGemma4-26B uncensored-v2** | `./llm-server.sh supergemma4` | ~13GB | 46 tok/s | 무검열(파인튜닝), 툴콜·한국어·코드 강화, 텍스트 전용 |
+| **SuperGemma4-26B abliterated-multimodal** | `./llm-server.sh supergemma4-vlm`¹ | ~15GB | ~49 tok/s | 무검열(EGA), 이미지+텍스트 입력 지원 |
 
-Loading two models at once is not possible (exceeds memory). Switch by restarting the server.
+두 모델 동시 로드는 불가 (메모리 초과). 서버 재시작으로 전환.
 
-> ¹ `supergemma4` runs the text-only uncensored-v2 (the `supergemma4-text` alias is identical). Run the multimodal variant with the `supergemma4-vlm` profile or `python llm-api-server.py --model Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit`.
+> ¹ `supergemma4`는 텍스트 전용 uncensored-v2를 실행 (`supergemma4-text` 별칭 동일). 멀티모달 variant는 `supergemma4-vlm` 프로필 또는 `python llm-api-server.py --model Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit`로 실행.
 
-> ³ Measured on an M5 Pro 64GB. Qwen3.8-8bit: 25.2 tok/s with MTP ON (drafter `mlx-community/Qwen3.8-27B-MTP-8bit`, block_size=6) vs 9.6 tok/s with `--no-mtp` — **2.64x**, measured 2026-08-23 (warm, non-streaming, thinking OFF, temp=0). Qwen3.6-6bit measured 2026-08-02.
+> ³ M5 Pro 64GB 실측. Qwen3.8-8bit: MTP ON(드래프터 `mlx-community/Qwen3.8-27B-MTP-8bit`, block_size=6) 25.2 tok/s vs `--no-mtp` 9.6 tok/s — **2.64배**, 2026-08-23 측정 (warm, 비스트리밍, thinking OFF, temp=0). Qwen3.6-6bit는 2026-08-02 측정.
 
-> ⁵ Qwen3.6-27B runs with **MTP OFF**: the drafter is trained for Qwen3.8-27B, so `llm-server.sh` disables it automatically on non-Qwen3.8 profiles. This row is an un-accelerated measurement.
+> ⁵ Qwen3.6-27B은 **MTP OFF**로 동작합니다. 드래프터가 Qwen3.8-27B용으로 학습돼 `llm-server.sh`가 non-Qwen3.8 프로필에서 자동 비활성화합니다. 이 값은 가속 없는 실측치입니다.
 
-> ⁶ Measured 2026-08-23 on an M5 Pro 64GB: 9.37 → **28.56 tok/s (3.05x)** on code, 9.80 → 16.36 (1.67x) on Korean prose. The drafter is trained on stock Qwen3.8-27B, but abliteration costs only ~3-6% of the stock model's speedup — acceptance holds. Peak memory is ~2GB higher than the default model, so 48GB machines are tight.
+> ⁶ 2026-08-23 M5 Pro 64GB 실측: 코드 9.37 → **28.56 tok/s (3.05배)**, 한국어 산문 9.80 → 16.36 (1.67배). 드래프터는 정품 Qwen3.8-27B 기반이지만 abliteration으로 인한 손실은 정품 대비 ~3~6%뿐 — acceptance가 유지된다. 피크 메모리가 기본 모델보다 ~2GB 높아 48GB 환경에서는 타이트하다.
 
-> ⁴ Relative speed vs the 27B dense (public benchmarks, not measured in this project). In Qwen's official benchmarks the 27B dense beats the 35B-A3B across the board, with a +15.5 point gap on SkillsBench (coding agents) — so the 27B stays the default.
+> ⁴ 27B dense 대비 상대 속도(공개 벤치 기준, 본 프로젝트 미실측). Qwen 공식 벤치에서 27B dense가 35B-A3B를 전 항목에서 앞서며 SkillsBench(코딩 에이전트)는 +15.5점 차이 — 기본 모델은 27B를 유지한다.
 
-### Feature Support by Model
+### 모델별 지원 기능
 
-| Feature | Qwen3.8-27B (stock + uncensored) / Qwen3.6-27B | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
+| 기능 | Qwen3.8-27B (정품 + 무검열) / Qwen3.6-27B | SuperGemma4 uncensored-v2 | SuperGemma4 abliterated-multimodal |
 |------|:-----------------:|:------------------------:|:---------------------------------:|
-| Context profiles (1m/262k) | ✅ | ❌ (fixed 128K) | ❌ (fixed 256K) |
-| Thinking mode (`enable_thinking`) | ✅ (OFF by default) | ❌ | ❌ |
-| Tool calling (`tools`) | ✅ (verified on Qwen3.8) | untested | untested |
-| Interactive chat (`llm-chat.sh`) | ✅ | ❌ | ❌ |
-| Image input (multimodal) | ✅ | ❌ | ✅ |
-| Video input | ❌ | ❌ | ❌ |
+| 컨텍스트 프로필 (1m/262k) | ✅ | ❌ (128K 고정) | ❌ (256K 고정) |
+| Thinking 모드 (`enable_thinking`) | ✅ (기본 OFF) | ❌ | ❌ |
+| Tool calling (`tools`) | ✅ (Qwen3.8 실측) | 미검증 | 미검증 |
+| 대화형 채팅 (`llm-chat.sh`) | ✅ | ❌ | ❌ |
+| 이미지 입력 (멀티모달) | ✅ | ❌ | ✅ |
+| 영상 입력 | ❌ | ❌ | ❌ |
 
-### Qwen3.8-Flash-Next (released 2026-08-26) — not adopted for now
+### Qwen3.8-Flash-Next (2026-08-26 공개) — 현재 미채택
 
-A Qwen4-architecture preview: 125B MoE with 6B active, plus a 51B n-gram embedding table (`model_type=qwen4_exp`). It beats Qwen3.8-27B on every published benchmark (DeepSWE 58.7 vs 42.2, JobBench 55.7 vs 33.4), but **it does not fit in 64GB**: the smallest MLX conversion is 68GB on disk, the official 4-bit is 112GB, and even mlx-vlm 0.7.0rc0's external PLE storage (n-gram table on SSD) leaves ~72GB resident. Requires mlx-vlm ≥ 0.6.17 (MTP only in 0.7.0rc0); this project is on 0.8.0. Revisit conditions are tracked in `TODO.md` §4.
+Qwen4 아키텍처 프리뷰. MoE 125B / 활성 6B + n-gram 임베딩 51B (`model_type=qwen4_exp`). 공개 벤치 전 항목에서 Qwen3.8-27B를 앞서지만(DeepSWE 58.7 vs 42.2, JobBench 55.7 vs 33.4) **64GB에 들어가지 않는다**: 가장 작은 MLX 변환본이 디스크 68GB, 공식 4-bit는 112GB, mlx-vlm 0.7.0rc0의 external PLE 스토리지(n-gram 테이블 SSD 상주)를 써도 상주 메모리 약 72GB. mlx-vlm 0.6.17 이상 필요(MTP는 0.7.0rc0에만), 이 프로젝트는 0.8.0. 재검토 조건은 `TODO.md` §4 참고.
 
-### Qwen3.6 → Qwen3.8 Switch (2026-08-18, current)
+### Qwen3.6 → Qwen3.8 전환 (2026-08-18, 현재)
 
-| Item | Qwen3.6-27B-6bit *(previous default)* | Qwen3.8-27B-8bit *(current default)* |
+| 항목 | Qwen3.6-27B-6bit *(이전 기본)* | Qwen3.8-27B-8bit *(현재 기본)* |
 |------|:------------------------------:|:------------------------------:|
-| **Architecture** | Dense 27B (`qwen3_5`) | Dense 27B (`qwen3_5`) — **identical, only the model ID changed** |
-| **Quantization** | 6bit (~22.8GB) | 8bit (~29.5GB) — no 6bit conversion exists for 3.8 |
-| **Measured memory** | ~23GB | peak ~34GB |
-| **Measured speed** | ~12 tok/s (MTP OFF — drafter is 3.8-only) | **~25 tok/s** (MTP ON) / 9.6 (`--no-mtp`) |
-| **Context** | 262K / 1M (YaRN) | 262K / 1M (same YaRN settings applied; 1M not yet measured on 3.8) |
-| **Tool calling** | untested | ✅ verified end-to-end (including dsh E2E) |
-| **Thinking** | ✅ | ✅ (had a silent no-op bug right after the switch → fixed 2026-08-18) |
-| **Runtime** | mlx-vlm 0.6.12 | mlx-vlm 0.6.13 at switch time → now **0.8.0** (upgraded 2026-11-18) |
+| **아키텍처** | Dense 27B (`qwen3_5`) | Dense 27B (`qwen3_5`) — **동일, 모델 ID만 교체** |
+| **양자화** | 6bit (~22.8GB) | 8bit (~29.5GB) — 3.8은 6bit 변환본 없음 |
+| **실측 메모리** | ~23GB | 피크 ~34GB |
+| **실측 속도** | ~12 tok/s (MTP OFF — 드래프터가 3.8 전용) | **~25 tok/s** (MTP ON) / 9.6 (`--no-mtp`) |
+| **컨텍스트** | 262K / 1M (YaRN) | 262K / 1M (YaRN 설정 동일 적용, 3.8 실측 미완) |
+| **Tool calling** | 미검증 | ✅ 실측 검증 (dsh E2E 포함) |
+| **Thinking** | ✅ | ✅ (전환 직후 무음 no-op 버그 있었음 → 2026-08-18 수정) |
+| **런타임** | mlx-vlm 0.6.12 | 전환 당시 mlx-vlm 0.6.13 → 현재 **0.8.0** (2026-11-18 업그레이드) |
 
-bf16 (54GB) is impractical on a 64GB Mac due to the wired memory limit, so 8bit was chosen.
-The architecture is identical, so the switch required no code changes — a trade of a little speed for next-generation quality.
+bf16(54GB)은 64GB Mac에서 wired memory limit 때문에 비실용이라 8bit를 선택.
+아키텍처가 동일해 코드 변경 없이 전환됐고, 속도를 조금 내주는 대신 상위 세대 품질을 얻는 트레이드오프.
 
-### Qwen3.5 → Qwen3.6 Switch and 3-Model Comparison (history)
+### Qwen3.5 → Qwen3.6 전환 및 3모델 비교 (히스토리)
 
-> Below is the record of the earlier Qwen3.5 → 3.6 switch.
+> 아래는 그 전 단계였던 Qwen3.5 → 3.6 전환 기록.
 
-| Item | Qwen3.5-35B-A3B *(previous)* | Qwen3.6-27B-6bit *(then default)* | SuperGemma4-26B uncensored-v2 |
+| 항목 | Qwen3.5-35B-A3B *(이전)* | Qwen3.6-27B-6bit *(당시 기본)* | SuperGemma4-26B uncensored-v2 |
 |------|:------------------------:|:------------------------------:|:-----------------------------:|
-| **Architecture** | MoE 35B (A3B active) | **Dense 27B** | MoE 26B |
-| **Runtime** | `mlx-lm` | `mlx-vlm` | `mlx-lm` |
-| **Memory** | ~20GB | ~23GB | ~13GB |
-| **Generation speed** | ~103 tok/s | ~12 tok/s³ | ~46 tok/s |
-| **Context** | 262K / 1M (YaRN) | 262K / 1M (YaRN) | fixed 128K |
-| **Image input** | ❌ | ✅ | ❌ |
-| **Thinking mode** | ✅ | ✅ **(OFF by default)** | ❌ |
-| **Uncensored** | ❌ | ❌ | ✅ (fine-tuned) |
-| **Korean/coding boost** | baseline | baseline | ✅ (fine-tuned) |
-| **Tool-call boost** | baseline | baseline | ✅ (2x↑) |
-| **Interactive chat** | ✅ | ✅ | ❌ |
+| **아키텍처** | MoE 35B (활성 A3B) | **Dense 27B** | MoE 26B |
+| **런타임** | `mlx-lm` | `mlx-vlm` | `mlx-lm` |
+| **메모리** | ~20GB | ~23GB | ~13GB |
+| **생성 속도** | ~103 tok/s | ~12 tok/s³ | ~46 tok/s |
+| **컨텍스트** | 262K / 1M (YaRN) | 262K / 1M (YaRN) | 128K 고정 |
+| **이미지 입력** | ❌ | ✅ | ❌ |
+| **Thinking 모드** | ✅ | ✅ **(기본 OFF)** | ❌ |
+| **검열 해제** | ❌ | ❌ | ✅ (파인튜닝) |
+| **한국어/코딩 강화** | 기본 | 기본 | ✅ (파인튜닝) |
+| **툴 콜 강화** | 기본 | 기본 | ✅ (2배↑) |
+| **대화형 채팅** | ✅ | ✅ | ❌ |
 | **MMLU-Pro** | - | **86.2** | 82.6 |
 | **SWE-bench Verified** | - | **77.2** | - |
 | **GPQA Diamond** | - | **87.8** | 82.3 |
 
-Qwen3.6 has fewer parameters but moved to a dense architecture, added multimodal input, and ships with Thinking OFF by default (per-request ON). It's slower than the MoE 3.5, but image and Thinking support are the key differences.
+Qwen3.6은 파라미터가 줄었지만 Dense 아키텍처로 전환 + 멀티모달 추가 + Thinking 기본 OFF, 요청별 ON 가능. 속도는 MoE였던 3.5보다 느리지만 이미지·Thinking 지원이 핵심 차이.
 
 ---
 
-## Requirements
+## 요구사항
 
-| Item | Minimum | Recommended |
+| 항목 | 최소 | 권장 |
 |------|------|------|
-| Mac | Apple Silicon (M1+) | M3 Pro / M4 Pro or newer |
-| Memory | 24GB (light models) | 48–64GB |
+| Mac | Apple Silicon (M1+) | M3 Pro / M4 Pro 이상 |
+| 메모리 | 24GB (경량 모델) | 48~64GB |
 | Python | 3.10+ | 3.11+ |
-| Disk | 20GB free | 50GB+ |
+| 디스크 | 20GB 여유 | 50GB+ |
 
-**Memory requirements vary by use case** — beyond the model weights you also need KV cache, the vision encoder, and Metal scratch buffers:
+**메모리 사양은 용도별로 다릅니다** — 모델 가중치 외에 KV cache, vision 인코더, Metal 임시 버퍼가 추가로 필요합니다:
 
-| Memory | Realistic usage |
+| 메모리 | 현실적인 용도 |
 |--------|--------------|
-| 24GB | Light models only (SuperGemma4 etc.). A 27B model may load but risks swap/OOM — short-context experiments only |
-| 32GB | Realistic minimum for Qwen3.6-27B-6bit with short prompts |
-| 48GB | Qwen3.8-27B-8bit usable (measured peak 34GB) |
-| 64GB | Recommended for multimodal + long context. 262K is practical |
+| 24GB | 경량 모델(SuperGemma4 등) 전용. 27B 모델은 로드는 되어도 swap/OOM 위험 — 짧은 컨텍스트 실험용 |
+| 32GB | Qwen3.6-27B-6bit 단문 사용의 현실적 최소 |
+| 48GB | Qwen3.8-27B-8bit 사용 가능 (실측 피크 34GB) |
+| 64GB | 멀티모달 + 긴 컨텍스트 권장. 262K 실사용 가능 |
 
-> The 1M context is the model/YaRN configuration ceiling — it does not mean you can practically "fill 1M" on any memory configuration.
+> 1M 컨텍스트는 모델/YaRN 설정상 상한이며, 어떤 메모리 구성에서도 "1M을 채워서" 실용적으로 쓸 수 있다는 의미는 아닙니다.
 
 ---
 
-## Installation
+## 설치
 
 ```bash
 git clone https://github.com/LeeKiYoung/local-llm.git
@@ -122,39 +122,39 @@ cd local-llm
 ./setup.sh
 ```
 
-`setup.sh` automatically:
-1. Checks Apple Silicon / Python / memory
-2. Shows a model selection menu matched to your memory
-3. Creates a virtualenv + installs **mlx-vlm==0.8.0 / mlx==0.32.4** (Qwen MTP/KV cache/MRoPE fixes, APC included) + FastAPI + uvicorn
-4. Downloads the chosen model and wires it into the scripts
+`setup.sh`가 자동으로:
+1. Apple Silicon / Python / 메모리 확인
+2. 메모리에 맞는 모델 선택 메뉴 표시
+3. 가상환경 생성 + **mlx-vlm==0.8.0 / mlx==0.32.4** (Qwen MTP/KV cache/MRoPE 수정, APC 포함) + FastAPI + uvicorn 설치
+4. 선택한 모델 다운로드 + 스크립트에 자동 반영
 
-| # | Model | Memory | Notes |
+| # | 모델 | 메모리 | 특징 |
 |:-:|------|------:|------|
-| 1 | **Qwen3.8-27B-8bit** ⭐ | ~30GB | VLM, text+image, Thinking OFF by default (48GB+ recommended) |
-| 2 | **Qwen3.6-27B-6bit** | ~23GB | VLM (previous default, for 32–48GB machines) |
-| 3 | **SuperGemma4-26B** (uncensored) | ~16GB | Uncensored secondary model (text only) |
-| 4 | Custom | - | Any Hugging Face model ID |
+| 1 | **Qwen3.8-27B-8bit** ⭐ | ~30GB | VLM, 텍스트+이미지, Thinking 기본 OFF (48GB+ 권장) |
+| 2 | **Qwen3.6-27B-6bit** | ~23GB | VLM (이전 기본, 32~48GB 환경용) |
+| 3 | **SuperGemma4-26B** (무검열) | ~16GB | 무검열 보조 모델 (텍스트 전용) |
+| 4 | 직접 입력 | - | Hugging Face 모델 ID |
 
-An automatic recommendation is shown based on your memory. Just press Enter to install the recommended model (Qwen3.8-27B-8bit).
+메모리에 따라 자동 추천이 표시됩니다. Enter만 누르면 추천 모델(Qwen3.8-27B-8bit)로 설치됩니다.
 
-### Environment Only (model later)
+### 환경만 셋업 (모델 나중에)
 
 ```bash
 ./setup.sh --no-model
 ```
 
-### Where are models stored?
+### 모델은 어디에 저장되나요?
 
-The model is downloaded automatically on first run to the default path:
+첫 실행 시 모델이 자동 다운로드되며, 기본 경로에 저장됩니다:
 
 ```
 ~/.cache/huggingface/hub/models--mlx-community--Qwen3.8-27B-8bit/    (~29.5GB)
 ```
 
-To change the location (e.g. external SSD):
+경로를 바꾸고 싶다면 (외장 SSD 등):
 
 ```bash
-# Add to ~/.zshrc
+# ~/.zshrc에 추가
 export HF_HOME=/Volumes/MySSD/.huggingface
 
 source ~/.zshrc && ./setup.sh
@@ -162,35 +162,35 @@ source ~/.zshrc && ./setup.sh
 
 ---
 
-## Project Structure
+## 프로젝트 구조
 
 ```
 local-llm/
-├── setup.sh                              # Automated setup (env + model + deps)
-├── llm-chat.sh                           # Interactive chat
-├── llm-server.sh                         # API server launcher
-├── llm-api-server.py                     # FastAPI custom API server (core)
-├── llm-proxy.py                          # Transparent logging proxy (optional)
-├── decision-server.sh                    # Kev decision model sidecar (Jev-compatible, :8009)
+├── setup.sh                              # 자동 셋업 (환경 + 모델 + 의존성)
+├── llm-chat.sh                           # 대화형 채팅
+├── llm-server.sh                         # API 서버 실행
+├── llm-api-server.py                     # FastAPI 커스텀 API 서버 (핵심)
+├── llm-proxy.py                          # 투명 로깅 프록시 (선택적 사용)
+├── decision-server.sh                    # Kev 판단모델 사이드카 (Jev 호환, :8009)
 ├── profiles/
-│   ├── config-qwen36-27b-262k.json       # Default profile (262K, Qwen3.6-27B)
-│   └── config-qwen36-27b-1m.json         # Extended profile (1M YaRN, Qwen3.6-27B)
+│   ├── config-qwen36-27b-262k.json       # 기본 프로필 (262K, Qwen3.6-27B)
+│   └── config-qwen36-27b-1m.json         # 확장 프로필 (1M YaRN, Qwen3.6-27B)
 ├── tests/
-│   ├── test_api_server.py                # API server tests
-│   ├── test_tool_calling.py              # tool calling / thinking tests
-│   ├── test_stats.py                     # dashboard aggregation tests
-│   ├── test_decisions.py                 # /v1/systemone decision endpoint tests
-│   └── test_proxy.py                     # proxy tests (126 total)
-├── local-llm-guide-2026.md               # Model comparison guide
-├── .venv/                                # Python virtualenv
-└── logs/                                 # Request/response JSONL logs (auto-created)
+│   ├── test_api_server.py                # API 서버 테스트
+│   ├── test_tool_calling.py              # tool calling / thinking 테스트
+│   ├── test_stats.py                     # 대시보드 집계 테스트
+│   ├── test_decisions.py                 # /v1/systemone 판단 엔드포인트 테스트
+│   └── test_proxy.py                     # 프록시 테스트 (전체 128개)
+├── local-llm-guide-2026.md               # 모델 비교 가이드 문서
+├── .venv/                                # Python 가상환경
+└── logs/                                 # 요청/응답 JSONL 로그 (자동 생성)
 ```
 
 ---
 
-## Quick Start
+## 빠른 시작 (Quick Start)
 
-### Step 1: Setup
+### 1단계: 셋업
 
 ```bash
 git clone https://github.com/LeeKiYoung/local-llm.git
@@ -198,61 +198,61 @@ cd local-llm
 ./setup.sh
 ```
 
-### Step 2: Start the server
+### 2단계: 서버 시작
 
 ```bash
-# Qwen3.8-27B uncensored (default) — runs API server + dsh dashboard together
+# Qwen3.8-27B (기본) — API 서버 + dsh 대시보드 함께 실행
 ./llm-server.sh
 
-# 1M context mode
+# 1M 컨텍스트 모드
 ./llm-server.sh 1m
 
-# Qwen3.6-35B-A3B (MoE, fast profile)
+# Qwen3.6-35B-A3B (MoE, 빠른 프로필)
 ./llm-server.sh qwen36-fast
 
 # SuperGemma4
 ./llm-server.sh supergemma4
 ```
 
-### Step 3: Send a request
+### 3단계: 요청 보내기
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "messages": [{"role": "user", "content": "Hello!"}],
+    "messages": [{"role": "user", "content": "안녕!"}],
     "max_tokens": 200
   }'
 ```
 
 ---
 
-## Usage Guide
+## 사용 가이드
 
-### 1. Interactive Chat
+### 1. 대화형 채팅
 
 ```bash
 ./llm-chat.sh           # 262K
-./llm-chat.sh 1m        # 1M context
-./llm-chat.sh 262k      # explicit 262K
+./llm-chat.sh 1m        # 1M 컨텍스트
+./llm-chat.sh 262k      # 명시적 262K
 ```
 
-Extra options:
+추가 옵션:
 
 ```bash
 ./llm-chat.sh 1m --temp 0.3
 ./llm-chat.sh --max-tokens 4000
-./llm-chat.sh --system-prompt "Answer in English only"
+./llm-chat.sh --system-prompt "한국어로만 답해줘"
 ```
 
-Example session:
+대화 예시:
 
 ```
-✅ 1M context (YaRN) applied
+✅ 1M 컨텍스트 (YaRN) 적용 완료
 
-🚀 Chat started (exit: Ctrl+C)
+🚀 채팅 시작 (종료: Ctrl+C)
 
->> Write a Fibonacci function in Python
+>> 파이썬으로 피보나치 함수 짜줘
 def fibonacci(n):
     a, b = 0, 1
     for _ in range(n):
@@ -260,199 +260,199 @@ def fibonacci(n):
     return a
 ```
 
-### 2. API Server
+### 2. API 서버
 
-OpenAI-compatible API server. FastAPI + the mlx_vlm Python API for direct inference.
-Reachable from other devices on the same network (e.g. a Mac mini).
+OpenAI 호환 API 서버. FastAPI + mlx_vlm Python API로 직접 추론.
+같은 네트워크의 다른 기기(맥미니 등)에서 접속 가능.
 
 ```bash
-# Qwen3.8-27B uncensored (default) — `qwen38` for the stock model
-./llm-server.sh              # 262K context, Thinking OFF, MTP ON, dsh dashboard auto-launch
-./llm-server.sh 1m           # 1M context (YaRN)
-./llm-server.sh 262k 9090    # custom port
-./llm-server.sh --think      # Thinking ON by default
-./llm-server.sh --no-mtp     # disable MTP speculative decoding
-./llm-server.sh --no-apc     # disable APC prefix caching
-./llm-server.sh --no-dsh     # API server only, no dsh dashboard
+# Qwen3.8-27B 무검열 (기본) — 정품은 `qwen38`
+./llm-server.sh              # 262K 컨텍스트, Thinking OFF, MTP ON, dsh 대시보드 자동 실행
+./llm-server.sh 1m           # 1M 컨텍스트 (YaRN)
+./llm-server.sh 262k 9090    # 포트 지정
+./llm-server.sh --think      # Thinking 기본 ON
+./llm-server.sh --no-mtp     # MTP speculative decoding 비활성화
+./llm-server.sh --no-apc     # APC prefix caching 비활성화
+./llm-server.sh --no-dsh     # dsh 대시보드 없이 API 서버만
 
-# Qwen3.8-27B Uncensored (orcarouter abliterated, same arch as default)
-./llm-server.sh qwen38-uncensored    # ~28GB auto-download on first run (uncensored alias works too)
+# Qwen3.8-27B 무검열 (orcarouter abliterated, 기본과 동일 아키텍처)
+./llm-server.sh qwen38-uncensored    # 첫 실행 시 ~28GB 자동 다운로드 (uncensored 별칭 동일)
 
-# Qwen3.6-27B (previous default, for 32–48GB machines)
+# Qwen3.6-27B (이전 기본, 32~48GB 환경용)
 ./llm-server.sh qwen36
 
-# Qwen3.6-35B-A3B (MoE, fast profile)
-./llm-server.sh qwen36-fast          # ~37GB auto-download on first run
+# Qwen3.6-35B-A3B (MoE, 빠른 프로필)
+./llm-server.sh qwen36-fast          # 첫 실행 시 ~37GB 자동 다운로드
 
 # SuperGemma4
-./llm-server.sh supergemma4          # ~16GB auto-download on first run
-./llm-server.sh supergemma4 9090     # custom port
+./llm-server.sh supergemma4          # 첫 실행 시 ~16GB 자동 다운로드
+./llm-server.sh supergemma4 9090     # 포트 지정
 ```
 
-On launch:
+실행하면:
 
 ```
-🌐 API server started
-   Local:     http://localhost:8080
-   Network:   http://<YOUR_LOCAL_IP>:8080
-   Dashboard: http://localhost:8080/dashboard
+🌐 API 서버 시작
+   로컬:     http://localhost:8080
+   네트워크: http://<YOUR_LOCAL_IP>:8080
+   대시보드: http://localhost:8080/dashboard
 
-   Endpoint: /v1/chat/completions
-   Streaming: stream=true supported
+   엔드포인트: /v1/chat/completions
+   스트리밍: stream=true 지원
 ```
 
-#### Basic call
+#### 기본 호출
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "messages": [{"role": "user", "content": "Hello!"}],
+    "messages": [{"role": "user", "content": "안녕!"}],
     "max_tokens": 200
   }'
 ```
 
-#### Streaming
+#### 스트리밍
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "messages": [{"role": "user", "content": "Hello!"}],
+    "messages": [{"role": "user", "content": "안녕!"}],
     "stream": true,
     "max_tokens": 200
   }'
 ```
 
-#### Requests with images (multimodal)
+#### 이미지 포함 요청 (멀티모달)
 
 ```bash
-# Image request (base64)
+# 이미지 포함 요청 (base64)
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [{"role": "user", "content": [
-      {"type": "text", "text": "Describe this image"},
+      {"type": "text", "text": "이 이미지를 설명해줘"},
       {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
     ]}],
     "max_tokens": 500
   }'
 ```
 
-> Remote `http(s)` image_url is disabled by default (SSRF prevention) — only `data:image/...;base64` is allowed.
-> If you need remote URLs, run the server with `--allow-remote-images`.
+> 원격 `http(s)` image_url은 기본 비활성 (SSRF 방지) — `data:image/...;base64`만 허용.
+> 원격 URL이 필요하면 서버를 `--allow-remote-images`로 실행.
 
-#### Per-request Thinking control
+#### 요청별 Thinking 제어
 
 ```bash
-# Enable Thinking (OFF by default → ON for this request only)
+# Thinking 활성화 (기본 OFF → 이 요청만 ON)
 curl http://localhost:8080/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"123*456=?"}],"enable_thinking":true,"preserve_thinking":true,"max_tokens":500}'
 ```
 
-#### Supported parameters (OpenAI compatible)
+#### 지원 파라미터 (OpenAI 호환)
 
-| Parameter | Type | Default | Description |
+| 파라미터 | 타입 | 기본값 | 설명 |
 |---------|------|--------|------|
-| `model` | string | server model | model ID |
-| `messages` | array | required | conversation messages |
-| `stream` | bool | false | SSE streaming |
-| `temperature` | float | 1.0 | sampling temperature |
-| `top_p` | float | 1.0 | nucleus sampling |
-| `max_tokens` | int | 2048 | max generated tokens |
-| `max_completion_tokens` | int | - | alias for max_tokens |
-| `stop` | string/array | null | stop sequences (not applied yet) |
-| `seed` | int | null | deterministic sampling (OpenAI compat; not passed to the model) |
-| `presence_penalty` | float | 0 | presence penalty (OpenAI compat; not passed to the model) |
-| `frequency_penalty` | float | 0 | frequency penalty (OpenAI compat; not passed to the model) |
-| `repetition_penalty` | float | null | repetition penalty (parsed; not currently passed to the model) |
-| `enable_thinking` | bool | false | Thinking mode (OFF by default, per-request ON; Qwen3.8/3.6) |
-| `preserve_thinking` | bool | false | true keeps the thinking text; false returns only the answer after `</think>` |
-| `tools` | array | null | OpenAI function calling schema — passed into the chat template |
-| `tool_choice` | string | null | `"none"` ignores tools (other values unsupported) |
+| `model` | string | 서버 모델 | 모델 ID |
+| `messages` | array | 필수 | 대화 메시지 |
+| `stream` | bool | false | SSE 스트리밍 |
+| `temperature` | float | 1.0 | 샘플링 온도 |
+| `top_p` | float | 1.0 | Nucleus sampling |
+| `max_tokens` | int | 2048 | 최대 생성 토큰 |
+| `max_completion_tokens` | int | - | max_tokens 별칭 |
+| `stop` | string/array | null | 정지 시퀀스 (현재 미적용) |
+| `seed` | int | null | 결정적 샘플링 (OpenAI 호환용, 모델에 전달되지 않음) |
+| `presence_penalty` | float | 0 | 존재 패널티 (OpenAI 호환용, 모델에 전달되지 않음) |
+| `frequency_penalty` | float | 0 | 빈도 패널티 (OpenAI 호환용, 모델에 전달되지 않음) |
+| `repetition_penalty` | float | null | 반복 패널티 (파싱됨, 현재 모델에 전달되지 않음) |
+| `enable_thinking` | bool | false | Thinking 모드 (기본 OFF, 요청별 ON 가능, Qwen3.8/3.6 지원) |
+| `preserve_thinking` | bool | false | true 시 thinking 텍스트 그대로 포함, false 시 `</think>` 이후 답변만 반환 |
+| `tools` | array | null | OpenAI function calling 스키마 — 채팅 템플릿에 전달됨 |
+| `tool_choice` | string | null | `"none"`이면 tools 무시 (그 외 값은 미지원) |
 
 #### Tool Calling (Function Calling)
 
-OpenAI-compatible tool calling is supported (2026-08-18, including streaming). When the model
-calls a function, the response comes back with `finish_reason: "tool_calls"` and OpenAI-format
-`tool_calls` (`arguments` is a JSON string). In streaming mode, content output stops when a
-`<tool_call>` is detected and a single tool_calls delta chunk is emitted at the end of the stream.
+OpenAI 호환 tool calling을 지원한다 (2026-08-18, 스트리밍 포함). 모델이 함수를 호출하면
+`finish_reason: "tool_calls"`와 함께 OpenAI 포맷 `tool_calls`가 반환된다
+(`arguments`는 JSON 문자열). 스트리밍에서는 `<tool_call>` 감지 시 content 출력을 멈추고
+스트림 끝에 tool_calls delta 청크 한 번으로 내보낸다.
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
-  -d '{"messages":[{"role":"user","content":"What is the weather in Seoul?"}],
+  -d '{"messages":[{"role":"user","content":"서울 날씨 알려줘"}],
        "tools":[{"type":"function","function":{"name":"get_weather",
          "parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}'
-# → {"finish_reason":"tool_calls","message":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\": \"Seoul\"}"}}]}}
+# → {"finish_reason":"tool_calls","message":{"tool_calls":[{"function":{"name":"get_weather","arguments":"{\"city\": \"서울\"}"}}]}}
 ```
 
-Return tool results the standard OpenAI way (`role: "tool"` + `tool_call_id`).
-Note: the Qwen3.8 chat template uses an XML-style tool call format
-(`<function=...><parameter=...>`), which the server converts to the OpenAI format.
+tool 결과는 표준 OpenAI 방식(`role: "tool"` + `tool_call_id`)으로 회신하면 된다.
+참고: Qwen3.8 채팅 템플릿은 XML 스타일(`<function=...><parameter=...>`) tool call 포맷을
+쓰며, 서버가 이를 OpenAI 포맷으로 변환한다.
 
-### Two ways to use it: direct API calls vs the dsh dashboard
+### 사용 방법 두 가지: API 직접 호출 vs dsh 대시보드
 
-This server can be used in two ways:
+이 서버는 두 가지 방식으로 쓸 수 있다:
 
-1. **Direct API calls** — OpenAI SDK-compatible clients (curl, Python SDK, Continue, etc.)
-   call `http://localhost:8080/v1` directly. All the examples above use this mode.
-2. **dsh agent dashboard** — a web UI where you type a question in the browser and an agent
-   completes the task on its own using tools (bash, file read/write, etc.).
+1. **API 직접 호출** — OpenAI SDK 호환 클라이언트(curl, Python SDK, Continue 등)가
+   `http://localhost:8080/v1`을 직접 호출. 위의 사용 예시들이 전부 이 방식.
+2. **dsh 에이전트 대시보드** — 브라우저에서 질문을 던지면 에이전트가 tool
+   (bash, 파일 읽기/쓰기 등)을 써가며 스스로 작업을 완수하는 웹 UI.
 
 ```mermaid
 flowchart LR
     subgraph Mac["Apple Silicon Mac"]
-        subgraph launcher["./llm-server.sh (launches both)"]
-            API["llm-api-server.py<br/>:8080<br/>OpenAI-compatible API"]
-            DSH["dsh web<br/>:3080<br/>agent dashboard"]
+        subgraph launcher["./llm-server.sh (하나로 둘 다 실행)"]
+            API["llm-api-server.py<br/>:8080<br/>OpenAI 호환 API"]
+            DSH["dsh web<br/>:3080<br/>에이전트 대시보드"]
         end
-        MLX["MLX inference engine<br/>Qwen3.8-27B (29.5GB)"]
-        TOOLS["Local tool execution<br/>bash · files · search"]
+        MLX["MLX 추론 엔진<br/>Qwen3.8-27B (29.5GB)"]
+        TOOLS["로컬 tool 실행<br/>bash · 파일 · 검색"]
     end
 
-    Browser["🌐 Browser<br/>127.0.0.1:3080"] -->|question| DSH
+    Browser["🌐 브라우저<br/>127.0.0.1:3080"] -->|질문 입력| DSH
     Client["💻 OpenAI SDK / curl<br/>Continue · Open WebUI"] -->|"/v1/chat/completions"| API
-    DSH -->|"OpenAI-format request<br/>(tools + enable_thinking)"| API
+    DSH -->|"OpenAI 포맷 요청<br/>(tools + enable_thinking)"| API
     API --> MLX
     MLX -->|"&lt;tool_call&gt; XML"| API
-    API -->|"converts to OpenAI tool_calls"| DSH
+    API -->|"OpenAI tool_calls 변환"| DSH
     DSH --> TOOLS
-    TOOLS -->|"execution result (role: tool)"| DSH
+    TOOLS -->|"실행 결과 (role: tool)"| DSH
 ```
 
-**Flow** (asking the dsh dashboard "count the lines in server.log"):
+**동작 플로우** (dsh 대시보드로 "server.log 줄 수 세줘"를 물으면):
 
-1. Browser → dsh converts the question to OpenAI format and sends it to `:8080` (with the tools schema)
-2. The server injects tools into the Qwen chat template and runs inference → the model calls a function via `<tool_call>` XML
-3. The server converts the XML to OpenAI `tool_calls` format and responds (`finish_reason: "tool_calls"`)
-4. dsh actually executes the tool locally (bash etc.) → sends the result back as a `role: "tool"` message
-5. Steps 2–4 repeat as needed until the model produces a final answer → shown in the browser
+1. 브라우저 → dsh가 질문을 OpenAI 포맷으로 변환해 `:8080`에 전달 (tools 스키마 포함)
+2. 서버가 Qwen 채팅 템플릿에 tools를 넣어 추론 → 모델이 `<tool_call>` XML로 함수 호출
+3. 서버가 XML을 OpenAI `tool_calls` 포맷으로 변환해 응답 (`finish_reason: "tool_calls"`)
+4. dsh가 로컬에서 tool(bash 등)을 실제 실행 → 결과를 `role: "tool"` 메시지로 다시 전달
+5. 필요하면 2~4를 반복하다가 모델이 최종 답변 생성 → 브라우저에 표시
 
-Every step runs locally; there are no external API calls.
+모든 단계가 로컬에서 처리되고 외부 API 호출은 없다.
 
-#### Getting connected
+#### 접속 방법
 
 ```bash
-./llm-server.sh          # API server (:8080) + dsh dashboard (:3080) together
-./llm-server.sh 1m       # 1M context (dsh auto-launches the same way)
-./llm-server.sh --no-dsh # API server only
+./llm-server.sh          # API 서버(:8080) + dsh 대시보드(:3080) 함께 실행
+./llm-server.sh 1m       # 1M 컨텍스트로 실행 (dsh 동일하게 자동 실행)
+./llm-server.sh --no-dsh # API 서버만
 ```
 
-- **Dashboard**: click http://127.0.0.1:3080 from the server banner → type directly into the prompt box
-- **API**: `http://localhost:8080/v1` (or `http://<LOCAL_IP>:8080/v1` on the same network)
-- Stopping the server with Ctrl+C also shuts down the dsh dashboard
+- **대시보드**: 서버 배너에 뜨는 http://127.0.0.1:3080 클릭 → 질문창에 바로 입력
+- **API**: `http://localhost:8080/v1` (같은 네트워크면 `http://<로컬IP>:8080/v1`)
+- 서버를 Ctrl+C로 끄면 dsh 대시보드도 함께 종료된다
 
-#### dsh configuration (`~/.dsh/settings.yaml`)
+#### dsh 설정 (`~/.dsh/settings.yaml`)
 
-Install dsh via `setup.sh` or `npm install -g @deepseek-ai/dsh`.
-Local server connection settings:
+dsh 설치는 `setup.sh`에서 선택하거나 `npm install -g @deepseek-ai/dsh`.
+로컬 서버 연결 설정:
 
 ```yaml
 llm-pi-ai:
   providers:
     local-mlx:
       displayName: Local MLX
-      apiKeyEnv: LOCAL_LLM_API_KEY   # the local server has no auth — any dummy value works
+      apiKeyEnv: LOCAL_LLM_API_KEY   # 로컬 서버는 인증 없음 — dummy 값이면 됨
       api: openai-completions
       baseURL: http://localhost:8080/v1
       defaultInput: [text, image]
@@ -461,7 +461,7 @@ llm-pi-ai:
       models:
         - id: mlx-community/Qwen3.8-27B-8bit
           name: Qwen3.8 27B (local MLX)
-          # thinking control: pi-ai's qwen dialect sends top-level enable_thinking
+          # thinking 제어: pi-ai의 qwen 다이얼렉트가 top-level enable_thinking을 전송
           compat:
             thinkingFormat: qwen
           reasoningEfforts:
@@ -471,50 +471,50 @@ llm-pi-ai:
 agent-default-model:
   provider: local-mlx
   model: mlx-community/Qwen3.8-27B-8bit
-  reasoningEffort: off   # off = no thinking (fast), high = thinking ON (slower but more accurate)
+  reasoningEffort: off   # off=thinking 없음(빠름), high=thinking ON(느리지만 정확)
 ```
 
-With thinking ON (`reasoningEffort: high`), the server buffers until `</think>` and streams only
-the answer, so the first token appears delayed by the thinking time (it's not stuck).
-Note: pi-ai sends a `developer` role for reasoning models; the server automatically maps it to `system`.
+thinking ON(`reasoningEffort: high`)일 땐 서버가 `</think>`까지 버퍼링 후 답변만
+스트리밍하므로 첫 토큰이 thinking 시간만큼 늦게 보인다 (멈춘 게 아님).
+참고: pi-ai는 reasoning 모델에 `developer` role을 보내는데 서버가 `system`으로 자동 매핑한다.
 
-One-shot runs from the terminal (instead of the web UI) also work:
+웹 UI 말고 터미널에서 단발 실행도 가능:
 
 ```bash
-LOCAL_LLM_API_KEY=local dsh --profile headless "How many files are in the current directory?"
+LOCAL_LLM_API_KEY=local dsh --profile headless "현재 디렉토리 파일 개수 알려줘"
 ```
 
-#### Web UI integration
+#### 웹 UI 연동
 
-Connect Continue, Open WebUI, etc. as an OpenAI endpoint:
+Continue, Open WebUI 등에서 OpenAI endpoint로 연결:
 - URL: `http://<YOUR_LOCAL_IP>:8080/v1`
-- API Key: any value (no auth)
+- API Key: 아무 값 (인증 없음)
 
-#### Access from outside the network (Tailscale)
+#### 외부 네트워크에서 접속 (Tailscale)
 
 ```bash
 brew install tailscale
-# After logging into Tailscale on both devices
+# 양쪽 기기에서 Tailscale 로그인 후
 curl http://<TAILSCALE_IP>:8080/v1/chat/completions ...
 ```
 
-#### Architecture
+#### 아키텍처
 
 ```
-Client (:8080) → FastAPI server (direct mlx_vlm API calls)
+클라이언트(:8080) → FastAPI 서버 (mlx_vlm API 직접 호출)
 ```
 
-- `asyncio.Semaphore(1)` — sequential GPU processing, concurrent HTTP intake
-- Returns 429 when the wait queue exceeds 5 (OOM protection)
-- **MTP speculative decoding** — separate 0.48GB drafter for Qwen3.8-27B, ON by default, 2.64x measured (see section below)
-- **Prompt KV cache reuse** — skips the common prefix in multi-turn conversations, shortening TTFT from the second turn (`PromptCacheState`)
-- **Vision encoder cache** — resending the same image skips the vision encoder, saving ~1–2s (`VisionFeatureCache`)
-- **Prefill chunking** — long prompts are split into 512-token chunks for better Metal kernel efficiency (`prefill_step_size`)
-- Metal GPU scratch buffers are released after each request (`mx.clear_cache()`); KV cache arrays are kept after eval
+- `asyncio.Semaphore(1)` — GPU 순차 처리, HTTP는 동시 수신
+- 대기 큐 5개 초과 시 429 응답 (OOM 방지)
+- **MTP Speculative Decoding** — Qwen3.8-27B용 별도 드래프터 0.48GB, 기본 ON, 실측 2.64배 (아래 섹션 참고)
+- **Prompt KV 캐시 재사용** — 멀티턴 대화에서 공통 prefix 스킵, 두 번째 턴부터 TTFT 단축 (`PromptCacheState`)
+- **Vision 인코더 캐시** — 같은 이미지 재전송 시 비전 인코더 스킵 ~1-2초 절약 (`VisionFeatureCache`)
+- **Prefill 청크 최적화** — 긴 프롬프트를 512토큰 청크로 나눠 Metal 커널 효율 향상 (`prefill_step_size`)
+- Metal GPU 임시 버퍼는 요청 완료 후 해제 (`mx.clear_cache()`), KV 캐시 배열은 eval 후 보존
 
-### 3. Logging
+### 3. 로깅
 
-Logging is **built into** the server. Both models log identically.
+서버에 로깅이 **내장**되어 있습니다. 두 모델 모두 동일하게 기록.
 
 ```
 logs/
@@ -522,92 +522,91 @@ logs/
 └── 2026-04-16.jsonl
 ```
 
-| Field | Contents |
+| 항목 | 내용 |
 |------|------|
-| timestamp | request time |
-| ip | caller's IP |
-| duration_ms | response time (ms) |
+| timestamp | 요청 시각 |
+| ip | 호출한 기기 IP |
+| duration_ms | 응답 시간 (ms) |
 | enable_thinking | Thinking ON/OFF |
-| stream | streaming or not |
-| prompt_preview | prompt preview (200 chars) |
-| content_preview | response preview (200 chars) |
-| usage | token usage (prompt / completion / total) |
+| stream | 스트리밍 여부 |
+| prompt_preview | 프롬프트 미리보기 (200자) |
+| content_preview | 응답 미리보기 (200자) |
+| usage | 토큰 사용량 (prompt / completion / total) |
 
 ```bash
-# View today's log
+# 오늘 로그 보기
 cat logs/$(date +%Y-%m-%d).jsonl | python3 -m json.tool
 
-# Request count per IP
+# IP별 호출 횟수
 cat logs/*.jsonl | jq -r '.ip' | sort | uniq -c | sort -rn
 
-# Find slow requests (over 3 seconds)
+# 느린 요청 찾기 (3초 이상)
 cat logs/*.jsonl | jq 'select(.duration_ms > 3000)'
 ```
 
-#### Web dashboard
+#### 웹 대시보드
 
-While the server is running, the logs above are visualized at **http://localhost:8080/dashboard**.
-It's built into the server, so it works without a separate process, Docker, or Grafana, and uses
-no external CDN — it renders fully offline. It goes down together with the server.
+서버가 떠 있으면 **http://localhost:8080/dashboard** 에서 위 로그를 그래프로 볼 수 있습니다.
+서버에 내장되어 있어 별도 프로세스나 Docker/Grafana 없이 동작하고, 외부 CDN을 전혀 쓰지
+않으므로 오프라인에서도 그대로 뜹니다. 서버를 내리면 대시보드도 같이 내려갑니다.
 
-| Panel | Contents |
+| 패널 | 내용 |
 |------|------|
-| Summary cards | total requests, total tokens, avg tokens/s, p50 / p90 response time |
-| Requests per day | request count by date |
-| Tokens per day | prompt vs completion tokens |
-| Response time percentiles | p50 / p90 / p99 / max |
-| Ratios | Thinking ON/OFF, Streaming ON/OFF, finish reason (stop/length) |
-| Recent requests | last 50 (time, IP, response time, tokens, prompt) |
+| 요약 카드 | 총 요청 수, 총 토큰, 평균 토큰/초, p50 / p90 응답 시간 |
+| 일별 요청 수 | 날짜별 요청 건수 |
+| 일별 토큰 | prompt vs completion 토큰 비교 |
+| 응답 시간 백분위 | p50 / p90 / p99 / max |
+| 비율 | Thinking ON/OFF, Streaming ON/OFF, 종료 사유(stop/length) |
+| 최근 요청 | 최근 50건 (시각, IP, 응답 시간, 토큰, 프롬프트) |
 
-The toolbar lets you pick the range (1/7/30 days) and the **auto-refresh interval (off/5s/10s/30s, default 10s)**.
-Auto-refresh swaps only the `/api/stats` result without reloading the page, and pauses polling
-while the tab is hidden, refreshing once immediately when you return.
+툴바에서 기간(1/7/30일)과 **자동 갱신 주기(끄기/5초/10초/30초, 기본 10초)** 를 고를 수 있습니다.
+자동 갱신은 페이지를 다시 불러오지 않고 `/api/stats` 결과만 교체하며, 탭이 숨겨져 있으면
+폴링을 멈췄다가 돌아올 때 즉시 한 번 갱신합니다.
 
-Aggregated data is also available directly via `GET /api/stats`.
+집계 데이터는 `GET /api/stats` 로 직접 받을 수도 있습니다.
 
 ```bash
-# Default: 7 days
+# 기본 7일
 curl -s localhost:8080/api/stats | jq
 
-# Custom range (1–30 days, auto-clamped if out of range)
+# 기간 지정 (1~30일, 범위를 벗어나면 자동 보정)
 curl -s "localhost:8080/api/stats?days=30" | jq '.duration_ms'
 ```
 
-> `days` counts **date files, not rolling 24-hour windows**. `days=1` reads only today's
-> `logs/YYYY-MM-DD.jsonl`, so right after midnight last night's requests won't appear.
-> Use `days=2` or more to cover that window.
+> `days`는 **롤링 24시간이 아니라 날짜 파일 단위**입니다. `days=1`은 오늘 자
+> `logs/YYYY-MM-DD.jsonl` 하나만 읽으므로, 자정 직후에는 어제 밤 요청이 잡히지 않습니다.
+> 그 구간까지 보려면 `days=2` 이상을 쓰세요.
 
 ---
 
-## Decision Model Sidecar (Jev-compatible Kev)
+## 판단모델 사이드카 (Jev 호환 Kev)
 
-A **decision model** does not write text: you send a `state` plus typed questions and it returns a
-probability for each option in one forward pass. TypeSafe's [Jev](https://docs.typesafe.ai) is
-hosted-only (no open weights). [Kev](https://github.com/jaredpalmer/kev) (Apache-2.0) is an open
-Jev-like family (Qwen3.5 base + LoRA adapter + pointer head) that serves **the same System One API**
-(`POST /v1/systemone`), so client code written for Jev works by changing only the base URL.
+**판단모델(decision model)** 은 글을 쓰지 않습니다. `state`와 타입 있는 질문을 보내면 한 번의
+포워드 패스로 선택지별 확률을 돌려줍니다. TypeSafe의 [Jev](https://docs.typesafe.ai)는 호스팅 전용(오픈
+웨이트 없음)이고, [Kev](https://github.com/jaredpalmer/kev)(Apache-2.0)는 Jev와 비슷한 오픈 모델
+패밀리(Qwen3.5 베이스 + LoRA 어댑터 + 포인터 헤드)로 **같은 System One API**(`POST /v1/systemone`)를
+제공합니다. Jev용으로 짠 클라이언트 코드는 주소만 바꾸면 그대로 동작합니다.
 
-It is useful where code asks the same closed question over and over and branches on the confidence —
-routing, "did the user actually ask for this command?", "is this 'done' claim backed by the tool
-output?", classification. (This is the revisit condition from #27; a Hermes agent plugin now logs
-decisions at three such points.) It is a **separate sidecar** on port 8009 and does not touch the
-`llm-server.sh` chat server on 8080.
+코드가 같은 닫힌 질문을 반복해서 묻고 확신도로 분기하는 자리에 씁니다 — 라우팅, "사용자가 이 명령을
+정말 요청했나?", "이 '완료' 보고가 도구 결과로 뒷받침되나?", 분류 등. (#27의 재검토 조건 — 이제 Hermes
+에이전트 플러그인이 이런 판단 지점 3곳을 기록합니다.) 포트 8009의 **별도 사이드카**라
+`llm-server.sh` 채팅 서버(8080)와는 무관합니다.
 
 ```bash
-./decision-server.sh              # Kev-4B (default) on 127.0.0.1:8009
-./decision-server.sh 0.8b         # smallest, low accuracy
-./decision-server.sh 9b 9009      # larger model, custom port
-./decision-server.sh --setup      # install only (clones kev into .kev/, uv sync)
-KEV_API_KEY=... ./decision-server.sh --host 0.0.0.0   # non-loopback needs a key (refuses without one)
+./decision-server.sh              # Kev-4B (기본), 127.0.0.1:8009
+./decision-server.sh 0.8b         # 가장 작음, 정확도 낮음
+./decision-server.sh 9b 9009      # 더 큰 모델, 포트 지정
+./decision-server.sh --setup      # 설치만 (kev를 .kev/에 클론 + uv sync)
+KEV_API_KEY=... ./decision-server.sh --host 0.0.0.0   # 루프백이 아니면 키 필수 (없으면 거부)
 ```
 
-Requires [uv](https://docs.astral.sh/uv/) (kev pins Python 3.13; torch has no 3.14 wheels). The first
-run downloads the base model (4B ≈ 9GB).
+[uv](https://docs.astral.sh/uv/)가 필요합니다(kev는 Python 3.13 고정 — torch에 3.14 휠이 없음).
+처음 실행 시 베이스 모델을 내려받습니다(4B ≈ 9GB).
 
 ```bash
 curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
   "model": "kev-latest",
-  "state": {"request": "Review PR #250 only, I will merge it myself", "command": "gh pr merge 250 --squash"},
+  "state": {"request": "#250 PR 리뷰만 해줘, 머지는 내가 할게", "command": "gh pr merge 250 --squash"},
   "questions": {
     "action": {"type": "choice", "instructions": "How should the agent handle this command?",
                "criteria": {"run": "Requested, run it", "ask": "Ask the user first", "reply": "Not requested, answer in words"}},
@@ -617,468 +616,461 @@ curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
 # → {"answers": {"action": {"choice": "...", "probabilities": {...}, "confidence": ...}, "requested": {"type": "noul", "noul": ...}}, ...}
 ```
 
-The server is plain HTTP, so a bearer key travels in clear text: expose it only inside an encrypted
-network (Tailscale) or keep it on 127.0.0.1 behind a TLS-terminating proxy. The Kev source is pinned
-to the `kev-1.0` release together with the `v1.0` weights.
+서버는 평문 HTTP라 Bearer 키도 평문으로 오갑니다 — 암호화된 망(Tailscale) 안에서만 열거나,
+127.0.0.1에 두고 TLS 종단 프록시 뒤에 두세요. Kev 서버 코드는 `v1.0` 가중치와 함께 `kev-1.0` 릴리스로
+고정됩니다.
 
-Hosted Jev uses the identical request: `https://openrouter.ai/api/v1/systemone` with
-`"model": "typesafe/jev-1.14"` and an OpenRouter key (about $0.00002 per call, output is free).
+호스팅 Jev도 요청은 똑같습니다: `https://openrouter.ai/api/v1/systemone`, `"model": "typesafe/jev-1.14"`,
+OpenRouter 키 (호출당 약 $0.00002, 출력 무료).
 
-### Measured on an M4 Mac mini 16GB (2026-10-21, Kev-4B@v1.0, MLX bf16)
+### M4 맥미니 16GB 실측 (2026-10-21, Kev-4B@v1.0, MLX bf16)
 
-| Item | Result |
+| 항목 | 결과 |
 |---|---|
-| Memory | steady 8.6–9.9GB, **peak 15GB** (1.4GB swap) — start it on demand, don't keep it resident on 16GB |
-| Load (model cached) | ~60s |
-| Latency | first request 18.7s (warm-up), then 0.5–1.6s per request |
-| Korean accuracy (8 Korean KB events, labels by a strong LLM grader) | **Jev 8/8 (Brier 0.099) vs Kev 5/8 (Brier 0.408)**, Kev had no answer ≥0.8 confidence |
+| 메모리 | 상시 8.6~9.9GB, **피크 15GB** (스왑 1.4GB) — 16GB에선 상주시키지 말고 필요할 때만 띄울 것 |
+| 로드 (모델 캐시 후) | 약 60초 |
+| 지연 | 첫 요청 18.7초(워밍업), 이후 요청당 0.5~1.6초 |
+| 한국어 정확도 (한국어 KB 이벤트 8건, 강한 LLM 채점기 정답 기준) | **Jev 8/8 (Brier 0.099) vs Kev 5/8 (Brier 0.408)**, Kev는 확신 0.8 이상 답이 0건 |
 
-Kev's model card says **English only**; write instructions/criteria in English and keep the content
-as-is, and measure on your own data before trusting a threshold. On a 64GB Mac, Kev-4B should fit next
-to the 27B chat server (~34GB) — expected, not measured. Sizes: 0.8B any Mac · 4B 32GB recommended
-(works on 16GB with swap) · 9B 32GB+.
+Kev 모델 카드는 **영어 전용**이라고 명시합니다 — 지시문·선택지 설명은 영어로, 내용은 그대로 두고, 임계값을
+믿기 전에 자기 데이터로 재보세요. 64GB 맥이면 27B 채팅 서버(~34GB) 옆에 Kev-4B가 같이 올라갈 것으로
+예상합니다(미측정). 크기: 0.8B 모든 맥 · 4B 32GB 권장(16GB는 스왑으로 동작) · 9B 32GB 이상.
 
-### Built-in endpoint on the chat server (`--decide`)
+### 채팅 서버 내장 엔드포인트 (`--decide`)
 
-The chat server can answer the same `/v1/systemone` requests on its own port, so a client that already
-talks to `:8080` gets decisions without another base URL. It is **off by default**.
+채팅 서버가 자기 포트에서 같은 `/v1/systemone` 요청에 답할 수 있습니다 — 이미 `:8080`을 쓰는 클라이언트는
+주소를 하나 더 두지 않고 판단을 받습니다. **기본은 꺼짐**입니다.
 
 ```bash
-./llm-server.sh --decide       # engine "llm": the loaded chat model scores the options
-./llm-server.sh --decide-kev   # engine "kev": forward to the Kev sidecar (start ./decision-server.sh first)
-# directly: python llm-api-server.py --decision-engine llm|kev [--kev-url URL] [--decision-temperature T]
+./llm-server.sh --decide       # "llm" 엔진: 로드된 채팅 모델이 선택지 확률을 매김
+./llm-server.sh --decide-kev   # "kev" 엔진: Kev 사이드카로 전달 (./decision-server.sh 먼저 실행)
+# 직접: python llm-api-server.py --decision-engine llm|kev [--kev-url URL] [--decision-temperature T]
 ```
 
-**What "sidecar" means here.** Like the passenger car bolted to a motorcycle: a small helper server
-that runs *next to* the main one as its own process. The main server is the chat server (`llm-server.sh`,
-the 27B on `:8080`); the sidecar is the Kev decision server (`decision-server.sh`, `:8009`). It has its own
-memory and is started and stopped separately.
+**"사이드카"란.** 오토바이 옆에 붙이는 보조 좌석처럼, **본 서버 옆에 따로 띄우는 작은 보조 서버**입니다.
+본체는 채팅 서버(`llm-server.sh`, 27B, `:8080`), 사이드카는 Kev 판단 서버(`decision-server.sh`, `:8009`) —
+별도 프로세스라 메모리도 따로 쓰고 켜고 끄는 것도 따로입니다.
 
-**`--decide` vs `--decide-kev`.** Both answer decision requests at the same `:8080/v1/systemone`, in the
-same format — a client can't tell them apart. **Only the model that makes the decision differs.**
+**`--decide` vs `--decide-kev`.** 둘 다 같은 `:8080/v1/systemone`에서 같은 형식으로 판단 요청을 받습니다 —
+클라이언트 입장에선 구분이 안 됩니다. **실제로 판단하는 모델만 다릅니다.**
 
-| | `--decide` (engine `llm`) | `--decide-kev` (engine `kev`) |
+| | `--decide` (엔진 `llm`) | `--decide-kev` (엔진 `kev`) |
 |---|---|---|
-| Who decides | **the chat model that is already loaded (27B)** | **the Kev sidecar** (a dedicated 4B decision model) |
-| How | shows the 27B options A/B/C and reads how likely each first letter is | the chat server forwards the request to Kev (`:8009`) and returns its answer |
-| Extra memory | none | ~10GB for Kev |
-| Korean | expected strong with the 27B (6/8 when tested with a 4B) | weak (5/8 — Kev is English-only) |
-| Calibrated probabilities | no — fit a temperature/thresholds on labeled data | yes — trained for calibration |
-| Before starting | nothing | start `./decision-server.sh` first |
+| 누가 판단하나 | **이미 올라와 있는 채팅 모델(27B)** | **Kev 사이드카** (판단 전용 4B 모델) |
+| 방식 | 27B에 선택지 A/B/C를 보여주고 첫 글자를 뭘 고를지 확률을 읽음 | 채팅 서버가 요청을 Kev(`:8009`)로 그대로 넘기고 답을 돌려줌 |
+| 추가 메모리 | 없음 | Kev 몫 약 10GB |
+| 한국어 | 27B라 강할 것으로 예상 (4B로 시험 시 6/8) | 약함 (5/8, Kev는 영어 전용) |
+| 확률 보정 | 안 돼 있음 — 라벨 데이터로 온도·임계값 맞춰야 함 | 판단용으로 보정 학습됨 |
+| 미리 할 일 | 없음 | `./decision-server.sh` 먼저 실행 |
 
-In one line: `--decide` lets the big model take on decisions too; `--decide-kev` hands them to a small
-decision-only model running beside it. For Korean on a 64GB Mac, `--decide` is the likely better pick —
-just remember its probabilities aren't calibrated.
+한 줄로: `--decide`는 큰 모델이 판단도 같이 맡는 것, `--decide-kev`는 옆에 판단 전용 작은 모델을 따로 두고
+그쪽에 맡기는 것. 64GB 맥에서 한국어로 쓴다면 `--decide`가 나을 가능성이 높습니다 — 확률이 보정 안 돼
+있다는 점만 주의하세요.
 
-How the `llm` engine works: for each question it renders `STATE / QUESTION / OPTIONS (A, B, C…)` with
-the model's chat template (thinking off), runs **one prefill and reads the first-token log-probabilities**
-(no generation, no MTP draft, chat prompt cache untouched), and renormalizes the probability mass on the
-option letters. `noul` = P(yes), `choice` = argmax with per-option probabilities, `score` = probability-
-weighted level index; `confidence` is the top option's probability. Each answer also carries
-`coverage` — how much of the whole vocabulary's probability landed on the option letters; well below 1
-means the model did not follow the "answer with one letter" format, so treat that answer as unreliable.
-It shares the GPU queue with chat requests (`429` when the queue is full).
+`llm` 엔진 동작: 질문마다 `STATE / QUESTION / OPTIONS (A, B, C…)`를 모델의 채팅 템플릿(thinking 끔)으로
+만들고, **프리필 1회 후 첫 토큰 로그확률만 읽어서**(생성·MTP 드래프트 없음, 채팅 프롬프트 캐시 안 건드림)
+선택지 글자에 실린 확률을 재정규화합니다. `noul` = P(예), `choice` = 최고 확률 선택지와 선택지별 확률,
+`score` = 확률 가중 레벨 인덱스, `confidence` = 최고 선택지 확률. 답마다 `coverage`도 붙습니다 — 전체
+어휘 확률 중 선택지 글자에 실린 비율로, 1보다 한참 낮으면 모델이 "글자 하나로 답" 형식을 안 따른 것이니
+그 답은 믿지 마세요. 채팅 요청과 같은 GPU 큐를 씁니다 (큐가 차면 `429`).
 
-Notes from testing on an M4 16GB with `mlx-community/Qwen3.5-4B-MLX-4bit` (the 27B can't load there):
-- 3 questions in 2.3s, 2 questions in 1.0s; `coverage` 0.998–0.999
-- log-softmax is computed in float32 (`logits_processors`) — mlx-vlm otherwise does it in bf16 and the
-  option probabilities summed to 1.02. The logits themselves are still bf16, so two near-equal options
-  can come out exactly equal (e.g. `noul: 0.5`).
-- the probabilities are **not calibrated** (unlike Jev/Kev, which are trained for it): tune
-  `--decision-temperature` and your thresholds on labeled data.
-- the same 8 Korean events: **Jev 8/8 · this engine with the 4B 6/8 · Kev-4B 5/8**. The 27B should do
-  better (not measured).
-- works with the official TypeSafe Python SDK unchanged (`TypeSafeClient(base_url="http://127.0.0.1:8080")`,
-  noul / choice / score parsed); chat replies at temperature 0 are byte-identical with and without
-  decision calls interleaved
-- not yet run with the 27B + MTP + APC interleaved with chat traffic (needs a 64GB Mac)
+M4 16GB에서 `mlx-community/Qwen3.5-4B-MLX-4bit`로 시험한 결과 (27B는 여기서 못 올림):
+- 질문 3개 2.3초, 2개 1.0초, `coverage` 0.998~0.999
+- log-softmax를 float32로 계산(`logits_processors`) — mlx-vlm 기본은 bf16이라 선택지 확률 합이 1.02가
+  됐었음. 로짓 자체는 여전히 bf16이라 거의 같은 두 선택지가 정확히 같게 나올 수 있음 (예: `noul: 0.5`)
+- 확률이 **보정돼 있지 않음** (보정을 학습한 Jev/Kev와 다름): 라벨 데이터로 `--decision-temperature`와
+  임계값을 맞출 것
+- 같은 한국어 이벤트 8건: **Jev 8/8 · 이 엔진(4B) 6/8 · Kev-4B 5/8**. 27B는 더 나을 것으로 예상(미측정)
+- 공식 TypeSafe Python SDK가 그대로 동작 (`TypeSafeClient(base_url="http://127.0.0.1:8080")`, noul / choice /
+  score 파싱 확인). 온도 0 채팅 응답은 판단 요청을 사이사이 끼워도 글자 하나 다르지 않음
+- 27B + MTP + APC에서 채팅과 섞어 돌린 검증은 아직 안 함 (64GB 맥 필요)
 
 ---
 
-## Context Profile System
+## 컨텍스트 프로필 시스템
 
-> Supported on Qwen3.8/3.6-27B. SuperGemma4 is fixed at 128K/256K and this system does not apply.
-> The 1M YaRN settings validated on Qwen3.6 are applied as-is to 3.8 (1M not yet measured on 3.8).
+> Qwen3.8/3.6-27B 지원. SuperGemma4는 128K/256K 고정, 이 시스템 해당 없음.
+> 1M YaRN 설정은 Qwen3.6에서 검증된 값을 3.8에 그대로 적용 중 (3.8에서 1M 실측은 미완).
 
-Two profiles: 262K (default) and 1M (extended). Switched by swapping `config.json`.
+262K(기본)와 1M(확장) 두 가지 프로필. `config.json` 교체 방식으로 전환.
 
 ```bash
-# Switch in chat
-./llm-chat.sh 1m       # switch to 1M, then start chat
-./llm-chat.sh 262k     # switch to 262K, then start chat
+# 채팅에서 전환
+./llm-chat.sh 1m       # 1M 전환 후 채팅 시작
+./llm-chat.sh 262k     # 262K 전환 후 채팅 시작
 
-# Switch on the API server
-./llm-server.sh 1m     # switch to 1M, then start server
-./llm-server.sh 262k   # switch to 262K, then start server
+# API 서버에서 전환
+./llm-server.sh 1m     # 1M 전환 후 서버 시작
+./llm-server.sh 262k   # 262K 전환 후 서버 시작
 ```
 
-| Profile | Context | Memory | Use case |
+| 프로필 | 컨텍스트 | 메모리 | 용도 |
 |-------|-------:|------:|------|
-| 262K (default) | ~520K chars | ~22–25GB | general chat, coding |
-| 1M (YaRN) | ~2M chars | ~34GB | large document / codebase analysis |
+| 262K (기본) | ~52만 글자 | ~22-25GB | 일반 대화, 코딩 |
+| 1M (YaRN) | ~200만 글자 | ~34GB | 대형 문서/코드베이스 분석 |
 
-- **Restart required** after switching (Ctrl+C → relaunch)
-- 1M mode may slightly degrade quality on short prompts (a property of static YaRN)
-- 262K is enough for everyday use. Only use 1M for genuinely long documents
+- 전환 후 **재시작 필요** (Ctrl+C → 다시 실행)
+- 1M 모드는 짧은 프롬프트에서 품질 약간 저하 가능 (Static YaRN 특성)
+- 평소에는 262K로 충분. 정말 긴 문서 작업할 때만 1M 권장
 
-### How it works
+### 동작 원리
 
-YaRN (Yet another RoPE extensioN) scales the positional encoding.
+YaRN(Yet another RoPE extensioN)으로 위치 인코딩을 스케일링.
 
-| Setting | 262K | 1M |
+| 설정 | 262K | 1M |
 |------|------|-----|
 | rope_type | `"default"` | `"yarn"` |
-| factor | (none) | `4.0` |
-| original_max_position_embeddings | (none) | `262144` |
+| factor | (없음) | `4.0` |
+| original_max_position_embeddings | (없음) | `262144` |
 
 ---
 
 ## MTP Speculative Decoding
 
-> Qwen3.8-27B only. Requires a **separate drafter checkpoint** — see the note below.
+> Qwen3.8-27B 전용. **별도 드래프터 체크포인트가 필요합니다** — 아래 설명 참고.
 
-### Overview
+### 개요
 
-MTP (Multi-Token Prediction) is a speculative decoding technique: a small draft head proposes several token candidates at once, the 27B target verifies them in a single forward pass, and every accepted token is committed in that one step.
+MTP(Multi-Token Prediction)는 작은 초안 헤드가 여러 토큰 후보를 한 번에 제안하고, 27B 타겟이 한 번의 포워드 패스로 검증해 통과한 토큰을 그 스텝에 모두 확정하는 Speculative Decoding 기법입니다.
 
-**The drafter must be passed explicitly.** `mlx-community/Qwen3.8-27B-8bit` declares `mtp_num_hidden_layers: 1` in its config, but its checkpoint contains **no MTP tensors** (0 matches in `model.safetensors.index.json`) — so there is no usable embedded head. `generate_step()` also needs `draft_model=` on top of `draft_kind`/`draft_block_size`; passing only the latter two leaves speculative decoding **silently inactive**. This project shipped in exactly that state until 2026-08-23, which is why the old measurement read ~9.8 tok/s.
+**드래프터를 명시적으로 넘겨야 동작합니다.** `mlx-community/Qwen3.8-27B-8bit`의 config에는 `mtp_num_hidden_layers: 1`이 선언돼 있지만 체크포인트에 **MTP 텐서가 없습니다**(`model.safetensors.index.json` 내 0건) — 즉 쓸 수 있는 내장 헤드가 없습니다. 또한 `generate_step()`은 `draft_kind`/`draft_block_size` 외에 `draft_model=`도 필요하며, 앞의 둘만 넘기면 speculative decoding이 **조용히 무동작**합니다. 이 프로젝트는 2026-08-23까지 정확히 그 상태였고, 그래서 이전 실측이 ~9.8 tok/s였습니다.
 
-- **Drafter** — `mlx-community/Qwen3.8-27B-MTP-8bit`, **0.48GB**, `model_type: qwen3_5_mtp`, auto-downloaded on first run. No extra Python packages
-- **Measured** — 9.6 → **25.2 tok/s (2.64x)** on an M5 Pro 64GB. Gains are largest on code (drafter acceptance is highest there) and smallest on prose
-- **Same model, same quality** — the 27B still produces every token that ships; the drafter only proposes. Code and reasoning outputs came back **byte-identical** to `--no-mtp`. Long-form prose can differ at a near-tie position (the same two candidates swap between runs), so treat output as *same distribution*, not bit-reproducible — response caching and reproducible eval runs cannot assume determinism
-- **Multimodal preserved** — image requests work and are accelerated too (the drafter config carries a `vision_config`)
+- **드래프터** — `mlx-community/Qwen3.8-27B-MTP-8bit`, **0.48GB**, `model_type: qwen3_5_mtp`, 첫 실행 시 자동 다운로드. 추가 Python 패키지 불필요
+- **실측** — M5 Pro 64GB에서 9.6 → **25.2 tok/s (2.64배)**. 코드 생성에서 이득이 가장 크고(드래프터 채택률이 가장 높음) 산문에서 가장 작습니다
+- **같은 모델, 같은 품질** — 최종 토큰은 여전히 27B가 냅니다. 드래프터는 제안만 합니다. 코드·추론 출력은 `--no-mtp`와 **바이트 단위로 동일**했습니다. 장문 산문은 near-tie 지점에서 갈릴 수 있으므로(같은 두 후보가 실행마다 뒤바뀜) *동일 분포*로 보되 비트 재현성은 가정하지 마세요 — 응답 캐싱과 재현 가능한 eval은 결정성을 전제할 수 없습니다
+- **멀티모달 유지** — 이미지 요청도 정상 동작하며 함께 가속됩니다 (드래프터 config에 `vision_config` 포함)
 
-### Default: ON
+### 기본값: ON
 
 ```
 🚀 MTP: ON (mtp, block_size=6)
    드래프터: mlx-community/Qwen3.8-27B-MTP-8bit
 ```
 
-Auto-enabled at server start; the drafter loads on the same thread as the model. If the drafter fails to load, the server logs a warning and continues with MTP off. Override the checkpoint with `--draft-model`. `block_size=6` measured faster than 3 (27.7 vs 22.5 tok/s), so the default stays 6.
+서버 시작 시 자동 활성화되며, 드래프터는 모델과 같은 스레드에서 로드됩니다. 드래프터 로드가 실패하면 경고만 남기고 MTP 없이 계속 동작합니다. `--draft-model`로 체크포인트를 바꿀 수 있습니다. `block_size=6`이 3보다 빨라(27.7 vs 22.5 tok/s) 기본값 6을 유지합니다.
 
-Non-Qwen3.8 profiles (`qwen36`, `qwen36-fast`, `supergemma4*`) disable the drafter automatically and say so on startup.
+non-Qwen3.8 프로필(`qwen36`, `qwen36-fast`, `supergemma4*`)은 드래프터를 자동 비활성화하고 시작 시 그 사실을 표시합니다.
 
-### Disable
+### 비활성화
 
 ```bash
 ./llm-server.sh --no-mtp
 ```
 
-Only for comparison or when MTP is not needed.
+비교용 또는 MTP가 불필요한 경우에만 사용.
 
-### Requirements
+### 요구사항
 
-- mlx-vlm pinned at **0.8.0** (includes Qwen MTP prefill, quantized KV cache, MRoPE position fixes, and faster qwen3_5 prefill/decode kernels)
-- Installed automatically by `setup.sh`: `pip install mlx-vlm==0.8.0 mlx==0.32.4` (only upgrade mlx together with mlx-vlm)
-- 0.6.13 → 0.8.0, measured 2026-11-18 on an M5 Pro 64GB (uncensored 8-bit + MTP, server-reported decode tok/s): code 24.9 → **27.7**, Korean prose 11.6 → **14.6**, image 17.4 → **19.3**, peak memory 36 → **32GB**
-- Since 0.7.9, mlx-vlm fills unset sampling options from the checkpoint's `generation_config.json` (Qwen3.8: `top_k=20`). The server passes `top_k=0` explicitly to keep the previous behavior
-- With an older version, the server auto-detects it at startup and falls back gracefully (prints an MTP-disabled warning)
+- mlx-vlm **0.8.0** 고정 (Qwen MTP prefill, quantized KV cache, MRoPE 위치 수정, qwen3_5 prefill/decode 커널 개선 포함)
+- `setup.sh`가 자동으로 설치: `pip install mlx-vlm==0.8.0 mlx==0.32.4` (mlx는 mlx-vlm과 짝으로만 올릴 것)
+- 0.6.13 → 0.8.0 실측 (2026-11-18, M5 Pro 64GB, 무검열 8-bit + MTP, 서버 보고 decode tok/s): 코드 24.9 → **27.7**, 한국어 산문 11.6 → **14.6**, 이미지 17.4 → **19.3**, 피크 메모리 36 → **32GB**
+- 0.7.9부터 mlx-vlm이 미지정 샘플링 값을 체크포인트 `generation_config.json`(Qwen3.8: `top_k=20`)으로 채운다. 서버는 `top_k=0`을 명시해 이전 동작을 유지한다
+- 구버전 설치 시 서버 시작 시 자동 감지 후 graceful fallback (MTP 비활성화 경고 출력)
 
 ---
 
 ## APC (Prefix Caching)
 
-> Automatic Prefix Caching from mlx-vlm 0.6.5+. ON by default.
+> mlx-vlm 0.6.5+ 의 Automatic Prefix Caching. 기본 ON.
 
-### Overview
+### 개요
 
-APC **reuses KV blocks of common prefixes across requests**, skipping the prefill. For agent
-clients like dsh that attach the same system prompt to every request, TTFT (time to first token)
-goes down.
+APC는 요청 간 **공통 프리픽스의 KV 블록을 재사용**해 프리필을 건너뜁니다. dsh처럼
+매 요청에 동일한 시스템 프롬프트를 붙여 보내는 에이전트 클라이언트에서 TTFT(첫 토큰까지
+시간)가 줄어듭니다.
 
-- **No effect on output quality** — it only reuses already-computed KV; sampling is untouched
-- **Per-model isolation** — the disk cache namespace is derived from the model_id, so `qwen36` / `qwen36-fast`
-  never reuse each other's KV blocks even if they share a directory
-- **Runs alongside** the existing `PromptCacheState` (reuses the previous turn's KV) and `VisionFeatureCache` (avoids re-encoding images)
+- **출력 품질 영향 없음** — 이미 계산된 KV를 재사용할 뿐, 샘플링에는 관여하지 않음
+- **모델별 격리** — 디스크 캐시 namespace를 model_id로 파생하므로 `qwen36` / `qwen36-fast`가
+  같은 디렉터리를 써도 서로의 KV 블록을 재사용하지 않음
+- 기존 `PromptCacheState`(직전 턴 KV 재사용) / `VisionFeatureCache`(이미지 재인코딩 방지)와 **병행 동작**
 
-### ⚠️ Measured results on Qwen3.6-27B (2026-08-02, M5 Pro 64GB)
+### ⚠️ Qwen3.6-27B에서의 실측 결과 (2026-08-02, M5 Pro 64GB)
 
-**No APC benefit was observed on this model.** The default stays ON, but **memory-only**.
+**이 모델에서는 APC 이득이 확인되지 않았습니다.** 기본값은 ON이되 **메모리 전용**입니다.
 
-- Qwen3.6-27B has a hybrid architecture (`linear_attention` + `full_attention`), so the recurrent
-  state cannot be reconstructed by concatenating K/V blocks. `model_apc_mode()` selects
-  **`"exact"` (full-prompt snapshot)** mode rather than `"block"`.
-- In an experiment that evicted the previous cache and re-requested the same prefix: **0 hits**
-  (A 4.83s → C 4.57s, effectively cold). It only consumed 1.4GB of disk.
-- `dispatch.py` only consults APC when `reused_prefix_len == 0`. That means if `PromptCacheState`
-  catches even a **trivial few-token match**, the APC lookup is skipped entirely.
+- Qwen3.6-27B는 hybrid 구조(`linear_attention` + `full_attention`)라 recurrent state를
+  K/V 블록 concat으로 복원할 수 없습니다. `model_apc_mode()`가 `"block"`이 아닌
+  **`"exact"`(전체 프롬프트 스냅샷)** 모드를 선택합니다.
+- 직전 캐시를 축출시킨 뒤 동일 프리픽스를 재요청하는 실험에서 **히트 0회**
+  (A 4.83s → C 4.57s, 사실상 콜드와 동일). 디스크만 1.4GB 소모했습니다.
+- `dispatch.py`는 `reused_prefix_len == 0`일 때만 APC를 조회합니다. 즉 `PromptCacheState`가
+  **몇 토큰짜리 사소한 매치**만 잡아도 APC 조회가 통째로 스킵됩니다.
 
-The perceived speedup (TTFT 12.27s → 0.44s) comes from the existing **`PromptCacheState`**, not APC.
-Sequential conversation patterns like dsh are already covered by that path.
+체감 속도 향상(TTFT 12.27s → 0.44s)은 APC가 아니라 **기존 `PromptCacheState`**가 내고 있습니다.
+dsh 같은 순차 대화 패턴은 이미 이쪽에서 커버됩니다.
 
-APC could become meaningful with a model that supports block mode (non-hybrid).
+block 모드를 지원하는 모델(non-hybrid)로 바꾸면 APC가 의미 있어질 수 있습니다.
 
-### Default: ON (memory-only)
+### 기본값: ON (메모리 전용)
 
 ```
-♻️  APC: ON (prefix caching, memory-only)
+♻️  APC: ON (prefix caching, 메모리 전용)
 ```
 
-### Disable / persist to disk
+### 비활성화 / 디스크 영속
 
 ```bash
-./llm-server.sh --no-apc                             # turn off
-python llm-api-server.py --apc-dir .apc-cache        # enable disk persistence
-python llm-api-server.py --apc-max-gb 50             # change disk cap (0 = unlimited)
+./llm-server.sh --no-apc                             # 끄기
+python llm-api-server.py --apc-dir .apc-cache        # 디스크 영속 활성화
+python llm-api-server.py --apc-max-gb 50             # 디스크 상한 변경 (0이면 무제한)
 ```
 
-`llm-server.sh` does not pass `--apc-dir` (= memory-only). If you need disk persistence,
-run `llm-api-server.py` directly.
+`llm-server.sh`는 `--apc-dir`를 넘기지 않습니다(= 메모리 전용). 디스크 영속이 필요하면
+`llm-api-server.py`를 직접 실행하세요.
 
-### Known limitation
+### 알려진 제약
 
-Requests containing images disable `prompt_cache_state` (a Metal KV consistency guard).
-APC itself understands multimodal prefixes, but this guard remains in place.
+이미지가 포함된 요청은 `prompt_cache_state`를 비활성화합니다(Metal KV 정합성 가드).
+APC 자체는 멀티모달 프리픽스를 인식하지만, 이 가드는 유지되고 있습니다.
 
 ---
 
-## Thinking Mode
+## Thinking 모드
 
-> Supported on Qwen3.8/3.6-27B. Sending `enable_thinking` to SuperGemma4 causes no error but is ignored. The server auto-detects and handles this.
+> Qwen3.8/3.6-27B 지원. SuperGemma4에서 `enable_thinking`을 보내도 오류는 없지만 무시됩니다. 서버가 자동 감지 처리.
 
-Thinking is OFF by default (DEFAULT_THINKING=False). Turn it ON per request with enable_thinking=true. With `preserve_thinking=true`, the thinking text is included in the response. The default (false) strips the thinking block and returns only the final answer.
+Thinking 기본 OFF (DEFAULT_THINKING=False). 요청 시 enable_thinking=true로 ON 가능. `preserve_thinking=true` 요청 시 thinking 텍스트가 응답에 포함됩니다. 기본값(false)은 thinking 블록을 제거하고 최종 답변만 반환합니다.
 
-> ⚠️ Fixed 2026-08-18: a bug where enable_thinking was silently ignored after the Qwen3.8 switch
-> (nested `chat_template_kwargs` passing was ignored by the template) was fixed by passing it as a top-level kwarg.
+> ⚠️ 2026-08-18 수정: enable_thinking이 Qwen3.8 전환 후 조용히 무시되던 버그
+> (`chat_template_kwargs` 중첩 전달이 템플릿에서 무시됨)를 top-level kwarg 전달로 고쳤습니다.
 
-> **How it works**: the Qwen chat template auto-injects the `<think>` opening tag as a prompt prefix. So the model's generated text only contains the closing `</think>` tag, never a complete `<think>...</think>` pair. With `preserve_thinking=false` (default), the server strips everything up to `</think>` and returns only the answer text. In streaming (`stream=true`) it behaves the same: chunks are buffered until `</think>` appears, and only subsequent chunks are delivered to the client.
+> **동작 메커니즘**: Qwen 채팅 템플릿이 `<think>` 시작 태그를 프롬프트 prefix로 자동 주입합니다. 따라서 모델 생성 텍스트에는 `</think>` 끝 태그만 나타나며, `<think>...</think>` 완성 형태로 생성되지 않습니다. `preserve_thinking=false`(기본값) 시 서버가 `</think>` 기준으로 이전 내용을 모두 제거하고 이후 답변 텍스트만 반환합니다. 스트리밍(`stream=true`)에서도 동일하게 `</think>` 나올 때까지 청크를 버퍼링하고 이후 청크부터 클라이언트에 전달합니다.
 
 ### Thinking ON
 
 ```
->> What is 123 * 456?
-<think>Let me compute 123 × 456.
+>> 123 * 456은?
+<think>123 × 456을 계산해보겠습니다.
 123 × 400 = 49,200
 123 × 56 = 6,888
 49,200 + 6,888 = 56,088</think>
 
-123 × 456 = 56,088.
+123 × 456 = 56,088 입니다.
 ```
 
-### Control by mode
+### 모드별 제어 방법
 
-| Mode | Method | Works |
+| 모드 | 방법 | 동작 |
 |------|------|:---:|
-| `llm-chat.sh` (interactive) | add `/no_think` to the prompt | O |
-| `llm-server.sh` (API) | Thinking OFF by default | O |
-| `llm-server.sh --think` (API) | server default becomes Thinking ON | O |
-| API request `enable_thinking` | **per-request control** | **O** |
-| API request `preserve_thinking` | **include the thinking block or not** | **O** |
+| `llm-chat.sh` (대화형) | 프롬프트에 `/no_think` 추가 | O |
+| `llm-server.sh` (API) | 기본값 Thinking OFF | O |
+| `llm-server.sh --think` (API) | 서버 기본값을 Thinking ON으로 | O |
+| API 요청 `enable_thinking` | **요청별 제어 가능** | **O** |
+| API 요청 `preserve_thinking` | **thinking 블록 포함 여부** | **O** |
 
-### When to turn it on or off?
+### 언제 켜고 끌까?
 
-| Situation | Thinking | Reason |
+| 상황 | Thinking | 이유 |
 |------|:-------:|------|
-| Math/logic | **ON** | major accuracy boost |
-| Coding | **ON** | step-by-step reasoning reduces bugs |
-| Simple questions | OFF | faster responses |
-| Translation/summarization | OFF | no reasoning needed |
-| Creative writing | OFF | more natural flow |
+| 수학/논리 | **ON** | 정확도 크게 향상 |
+| 코딩 | **ON** | 단계적 사고로 버그 감소 |
+| 간단한 질문 | OFF | 빠른 응답 |
+| 번역/요약 | OFF | 생각 과정 불필요 |
+| 창작/글쓰기 | OFF | 자연스러운 흐름 |
 
-- Thinking tokens count against `max_tokens` → with Thinking ON, 8000+ is recommended
+- Thinking 토큰도 `max_tokens`에 포함 → Thinking ON 시 8000+ 권장
 
 ---
 
-## Parameter Guide
+## 파라미터 가이드
 
 ### Temperature
 
-| Value | Effect | Use case |
+| 값 | 효과 | 용도 |
 |---|------|------|
-| 0.0 | deterministic (always the same answer) | coding, math |
-| 0.3 | slight variation | general chat |
-| 0.7 | creative | writing, brainstorming |
-| 1.0+ | very random | experiments |
+| 0.0 | 결정적 (항상 같은 답) | 코딩, 수학 |
+| 0.3 | 약간의 변화 | 일반 대화 |
+| 0.7 | 창의적 | 글쓰기, 브레인스토밍 |
+| 1.0+ | 매우 랜덤 | 실험용 |
 
-> **⚠️ Behavior change (2026-08-02)**
-> Previous versions passed the value to mlx-vlm under the wrong argument name `temp=`, so **the
-> client's temperature was ignored and everything ran at 0.0 (greedy)**. It is now applied correctly.
-> When unspecified, the OpenAI default of **1.0** applies, so if you want the old deterministic
-> output, explicitly set `"temperature": 0.0` in the request.
+> **⚠️ 동작 변경 (2026-08-02)**
+> 이전 버전은 mlx-vlm에 `temp=`라는 잘못된 인자명으로 값을 넘겨 **클라이언트가 보낸
+> temperature가 무시되고 항상 0.0(greedy)으로 동작**했습니다. 이제 정상 반영됩니다.
+> 미지정 시 OpenAI 기본값인 **1.0**이 적용되므로, 이전과 같은 결정적 출력을 원하면
+> 요청에 `"temperature": 0.0`을 명시하세요.
 >
-> Verified on Qwen3.6-27B: `0.0` → `"Purple elephants dance on moonlight."`,
-> `2.0` → degenerate output (token repetition). Confirms temperature reaches the sampler.
+> 실측 확인 (Qwen3.6-27B): `0.0` → `"Purple elephants dance on moonlight."`,
+> `2.0` → 출력 붕괴(토큰 반복). temperature가 샘플러까지 도달함을 확인했습니다.
 
-### Supported sampling parameters
+### 지원하는 샘플링 파라미터
 
-| Parameter | Passed through | Notes |
+| 파라미터 | 전달 여부 | 비고 |
 |---|:-:|---|
-| `temperature` | ✅ | default 1.0 |
-| `top_p` | ✅ | default 1.0 |
-| `seed` | ✅ | **auto-generated per request when unspecified** (see below) |
-| `repetition_penalty` | ✅ | None when unspecified |
-| `presence_penalty` | ✅ | converted to None when 0 |
-| `frequency_penalty` | ✅ | converted to None when 0 |
-| `stop` | ❌ | parsed but not passed — mlx-vlm handles `eos_tokens` only in `generate()`, not `stream_generate()`, so streaming/non-streaming would diverge |
+| `temperature` | ✅ | 기본 1.0 |
+| `top_p` | ✅ | 기본 1.0 |
+| `seed` | ✅ | **미지정 시 서버가 요청마다 자동 생성** (아래 참조) |
+| `repetition_penalty` | ✅ | 미지정 시 None |
+| `presence_penalty` | ✅ | 0이면 None으로 변환 |
+| `frequency_penalty` | ✅ | 0이면 None으로 변환 |
+| `stop` | ❌ | 파싱은 되나 미전달 — mlx-vlm의 `eos_tokens` 처리가 `generate()`에만 있고 `stream_generate()`에는 없어 스트리밍/비스트리밍 동작이 갈림 |
 
-### Automatic seed generation — working around a worker-thread RNG issue
+### seed 자동 생성 — 워커 스레드 RNG 이슈 우회
 
-**Symptom.** Repeating the same request with `temperature > 0` returned **exactly the same
-response every time**. Changing the temperature changed the output, so sampling itself worked —
-only run-to-run variation was missing.
+**증상.** `temperature > 0`으로 같은 요청을 반복해도 **매번 완전히 동일한 응답**이 나왔습니다.
+temperature 값을 바꾸면 출력은 달라지므로 샘플링 자체는 동작하는데, run-to-run 변화만
+없는 상태였습니다.
 
-**Cause.** Because MLX streams are thread-local, this server runs model loading and all inference
-on a dedicated worker thread (`_gpu_executor`). But MLX's global RNG (`mx.random.state`) array is
-bound to the main thread's stream, so accessing it from the worker thread fails:
+**원인.** 이 서버는 MLX 스트림이 thread-local이라 모델 로드와 모든 추론을 전용 워커
+스레드(`_gpu_executor`)에서 실행합니다. 그런데 MLX의 전역 RNG(`mx.random.state`) 배열은
+메인 스레드의 스트림에 묶여 있어 워커 스레드에서 접근하면 다음과 같이 실패합니다:
 
 ```
 RuntimeError: There is no Stream(gpu, 0) in current thread.
 ```
 
-As a result the global RNG state **never advances**, drawing the same random numbers on every request.
+결과적으로 전역 RNG 상태가 **진행되지 않아** 매 요청 같은 난수를 뽑습니다.
 
-**Fix.** When the client doesn't specify a `seed` and `temperature > 0`, the server generates a
-seed per request. When a seed is present, mlx-vlm uses a sampler that keys off **seed + token
-position** instead of the global RNG, sidestepping the worker-thread issue.
+**수정.** 클라이언트가 `seed`를 지정하지 않고 `temperature > 0`이면 서버가 요청마다
+seed를 생성해 전달합니다. mlx-vlm은 seed가 있으면 전역 RNG 대신 **seed + 토큰 위치**로
+키를 만드는 sampler를 쓰므로 워커 스레드 문제를 우회합니다.
 
-- No `seed` → different response per request (same as OpenAI's default behavior)
-- `seed` specified → fully reproducible
+- `seed` 미지정 → 요청마다 다른 응답 (OpenAI 기본 동작과 동일)
+- `seed` 지정 → 완전히 재현 가능
 
-**Measured (Qwen3.6-27B, `temp=1.0 top_p=1.0`, same prompt 6 times)**
+**실측 (Qwen3.6-27B, `temp=1.0 top_p=1.0`, 동일 프롬프트 6회)**
 
-| | Unique responses |
+| | 고유 응답 수 |
 |---|---|
-| Before fix | **1 / 6** |
-| After fix | **6 / 6** |
-| `seed=42` fixed, 3 runs | 1 / 3 (reproducibility intact) |
+| 수정 전 | **1 / 6** |
+| 수정 후 | **6 / 6** |
+| `seed=42` 고정 3회 | 1 / 3 (재현성 유지) |
 
-> Unrelated to MTP ON/OFF (reproduced and fix-verified in both).
+> MTP ON/OFF와는 무관합니다 (양쪽에서 동일하게 재현 후 수정 확인).
 
 ### Max Tokens
 
-| Use case | Recommended |
+| 용도 | 권장 값 |
 |------|------:|
-| Short answers | 200 |
-| General chat | 500 |
-| Code generation | 1000–2000 |
-| Long documents | 4000+ |
+| 짧은 답변 | 200 |
+| 일반 대화 | 500 |
+| 코드 생성 | 1000-2000 |
+| 긴 문서 | 4000+ |
 | Thinking ON | 8000+ |
 
 ---
 
-## SuperGemma4 Lineup Details
+## SuperGemma4 라인업 상세
 
-All SuperGemma4 variants published by Jiunsong. Pick by runtime and use case.
+Jiunsong이 배포한 SuperGemma4 전체 variant. 런타임·용도에 맞게 선택.
 
-| Model | Params | Format | Runtime | Size | Multimodal | Uncensoring method |
+| 모델 | 파라미터 | 포맷 | 런타임 | 용량 | 멀티모달 | 검열 해제 방식 |
 |------|:-------:|------|--------|-----:|:-------:|:------------:|
-| `uncensored-mlx-4bit-v2` | 26B MoE | MLX 4bit | `mlx_lm` | ~13GB | ❌ | Uncensored (fine-tuned), default |
-| `abliterated-multimodal-mlx-4bit` | 26B MoE | MLX 4bit | `mlx_vlm` | ~15GB | ✅ | Abliterated+EGA, 2.2K downloads |
-| `abliterated-multimodal-mlx-8bit` | 26B MoE | MLX 8bit | `mlx_vlm` | ~24GB | ✅ | Same as above, higher quality |
-| `uncensored-gguf-v2` (Ollama) | 26B MoE | GGUF Q4_K_M | llama.cpp / Ollama | ~17GB | ❌ | Uncensored (fine-tuned), 42K+ downloads |
-| `SuperGemma4-31b-abliterated-mlx-4bit` | 31B **Dense** | MLX 4bit | `mlx_lm` | ~17.3GB | ❌ | Abliterated, slow |
-| `SuperGemma4-31b-abliterated-GGUF` | 31B **Dense** | GGUF Q4_K_M | llama.cpp / Ollama | ~18.7GB | ❌ | Abliterated, slow |
+| `uncensored-mlx-4bit-v2` | 26B MoE | MLX 4bit | `mlx_lm` | ~13GB | ❌ | Uncensored (파인튜닝), 기본값 |
+| `abliterated-multimodal-mlx-4bit` | 26B MoE | MLX 4bit | `mlx_vlm` | ~15GB | ✅ | Abliterated+EGA, 2.2K 다운로드 |
+| `abliterated-multimodal-mlx-8bit` | 26B MoE | MLX 8bit | `mlx_vlm` | ~24GB | ✅ | 위와 동일, 더 높은 품질 |
+| `uncensored-gguf-v2` (Ollama) | 26B MoE | GGUF Q4_K_M | llama.cpp / Ollama | ~17GB | ❌ | Uncensored (파인튜닝), 42K+ 다운로드 |
+| `SuperGemma4-31b-abliterated-mlx-4bit` | 31B **Dense** | MLX 4bit | `mlx_lm` | ~17.3GB | ❌ | Abliterated, 느림 |
+| `SuperGemma4-31b-abliterated-GGUF` | 31B **Dense** | GGUF Q4_K_M | llama.cpp / Ollama | ~18.7GB | ❌ | Abliterated, 느림 |
 
-### 26B variant comparison (MLX)
+### 26B variant 비교 (MLX)
 
-Same 26B family, but different purposes.
+같은 26B 계열이지만 목적이 다름.
 
-| Item | `uncensored-mlx-4bit-v2` | `abliterated-multimodal-mlx-4bit` |
+| 항목 | `uncensored-mlx-4bit-v2` | `abliterated-multimodal-mlx-4bit` |
 |------|:------------------------:|:---------------------------------:|
-| **Uncensoring method** | Uncensored (fine-tuned) | Abliterated (weight vector removal) |
-| **Multimodal** | ❌ text only | ✅ image + text |
-| **Server library** | `mlx_lm` | `mlx_vlm` (v0.4.3+, day-0 support) |
-| **Disk size** | ~13GB | ~15GB |
-| **Generation speed** | 46.2 tok/s | ~49.5 tok/s |
-| **Korean/code boost** | ✅ improved via fine-tuning | baseline |
-| **HF downloads** | ~8,908 | ~2,230 |
+| **검열 해제 방식** | Uncensored (파인튜닝) | Abliterated (가중치 벡터 제거) |
+| **멀티모달** | ❌ 텍스트 전용 | ✅ 이미지+텍스트 |
+| **서버 라이브러리** | `mlx_lm` | `mlx_vlm` (v0.4.3+, Day-0 지원) |
+| **디스크 용량** | ~13GB | ~15GB |
+| **생성 속도** | 46.2 tok/s | ~49.5 tok/s |
+| **한국어/코드 강화** | ✅ 파인튜닝으로 향상 | 기본 수준 |
+| **HF 다운로드** | ~8,908 | ~2,230 |
 
-> **Difference between uncensoring methods**
-> - **Uncensored**: retrained on data to answer directly without refusals → code and Korean performance improve too
-> - **Abliterated**: surgically removes the model's internal "refusal" direction vector → uncensored without extra training, no capability gains
->   - Due to Gemma 4 26B's MoE structure, standard abliteration leaves a 29% refusal rate → **EGA (Expert-Granular Abliteration)** applies it per expert, reducing it to 0.7%
+> **검열 해제 방식 차이**
+> - **Uncensored**: 거부 없이 직접 답하도록 데이터로 재학습 → 코드·한국어 성능도 함께 향상
+> - **Abliterated**: 모델 내부의 "거부" 방향 벡터를 수술적으로 제거 → 추가 학습 없이 검열 해제, 능력 향상은 없음
+>   - Gemma 4 26B는 MoE 구조 특성상 표준 abliteration만으론 거부율 29% 잔존 → **EGA(Expert-Granular Abliteration)** 로 각 전문가(expert)에 개별 적용해 0.7%로 감소
 
-### uncensored-v2 Quick Bench performance (vs Gemma 4 26B IT)
+### uncensored-v2 Quick Bench 성능 (vs Gemma 4 26B IT 기준)
 
-| Category | Gemma 4 26B IT | SuperGemma4 uncensored-v2 | Gain |
+| 카테고리 | Gemma 4 26B IT | SuperGemma4 uncensored-v2 | 향상 |
 |---------|:--------------:|:-------------------------:|:----:|
-| Code | 92.3 | 98.6 | +6.3 |
-| Logic/reasoning | 86.9 | 95.2 | +8.3 |
-| Korean | 90.7 | 95.0 | +4.3 |
-| **Overall** | **91.4** | **95.8** | **+4.4** |
+| 코드 | 92.3 | 98.6 | +6.3 |
+| 로직/추론 | 86.9 | 95.2 | +8.3 |
+| 한국어 | 90.7 | 95.0 | +4.3 |
+| **전체** | **91.4** | **95.8** | **+4.4** |
 
-v2 improvements over v1: tool-call routing bug fix, +8.7% generation speed (46.2 tok/s), neutralized chat template.
+v1 대비 v2 개선: tool-call 라우팅 버그 수정, 생성 속도 +8.7% (46.2 tok/s), 채팅 템플릿 중립화.
 
-### The 31B models
+### 31B 모델
 
-5B more parameters than the 26B. Text-only, abliterated.
+26B 대비 파라미터 5B 증가. 텍스트 전용, Abliterated 방식.
 
-| Item | MLX 4bit | GGUF Q4_K_M |
+| 항목 | MLX 4bit | GGUF Q4_K_M |
 |------|:--------:|:-----------:|
-| **Runtime** | `mlx_lm` (Apple Silicon) | llama.cpp / Ollama |
-| **Size** | ~17.3GB | ~18.7GB |
-| **Generation speed (reference)** | not measured on MLX (~30 tok/s on RTX 3090) | - |
-| **Multimodal** | ❌ | ❌ |
-| **HF downloads** | ~1,302 | - |
-| **HF** | [link](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-mlx-4bit) | [link](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-GGUF) |
+| **런타임** | `mlx_lm` (Apple Silicon) | llama.cpp / Ollama |
+| **용량** | ~17.3GB | ~18.7GB |
+| **생성 속도 (참고)** | MLX 미측정 (RTX 3090 기준 ~30 tok/s) | - |
+| **멀티모달** | ❌ | ❌ |
+| **HF 다운로드** | ~1,302 | - |
+| **HF** | [링크](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-mlx-4bit) | [링크](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-GGUF) |
 
-> Unlike the 26B uncensored-v2, the 31B is abliterated-only with no fine-tuning — so no code/Korean improvements. Being dense, it generates slower than the 26B MoE. The point is base-capability gains from the raw parameter increase.
+> 31B는 26B uncensored-v2 대비 파인튜닝 없이 Abliterated만 적용 — 코드·한국어 강화 효과는 없음. Dense 구조라 26B MoE보다 생성 속도가 느림. 순수 파라미터 증가에 따른 베이스 성능 향상이 목적.
 
-**Bottom line**
-- Need image handling → `abliterated-multimodal` (26B MLX, `mlx_vlm` v0.4.3+)
-- Text, coding, and Korean focused → `uncensored-v2` (26B MLX, `mlx_lm`)
-- Prefer llama.cpp / Ollama → `uncensored-gguf-v2` (26B, 89.4 tok/s, most used in the community)
-- Want a larger model → `31b-abliterated` (MLX or GGUF, ~17–19GB, but dense and slow)
+**결론**
+- 이미지 처리 필요 → `abliterated-multimodal` (26B MLX, `mlx_vlm` v0.4.3+)
+- 텍스트, 코딩·한국어 위주 → `uncensored-v2` (26B MLX, `mlx_lm`)
+- llama.cpp / Ollama 선호 → `uncensored-gguf-v2` (26B, 89.4 tok/s, 커뮤니티 최다 사용)
+- 더 큰 모델 원할 때 → `31b-abliterated` (MLX or GGUF, ~17-19GB, 단 Dense라 느림)
 
-> **⚠️ Known bug**: the Gemma4 base model's token repetition collapse bug is officially confirmed as [google-deepmind/gemma#622](https://github.com/google-deepmind/gemma/issues/622). Reproduced on Ollama/LMStudio. **Not reproduced on MLX** — presumed to be a serving template issue.
+> **⚠️ 알려진 버그**: Gemma4 베이스 모델의 토큰 반복 붕괴(token repetition collapse) 버그가 [google-deepmind/gemma#622](https://github.com/google-deepmind/gemma/issues/622)로 공식 확인됨. Ollama/LMStudio 환경에서 재현. **MLX 환경에서는 미재현** — serving template 문제로 추정.
 
-> **⚠️ MLX caveat**: do not pass a file path string directly to the `--chat-template` option. The path string gets injected verbatim in place of the template body, corrupting responses. The right approach is to let auto-detection use the model's bundled template.
+> **⚠️ MLX 주의사항**: `--chat-template` 옵션에 파일 경로 문자열을 직접 전달하지 말 것. 경로 문자열이 템플릿 본문 대신 그대로 주입되어 응답이 손상됨. 모델 내부 번들 템플릿을 자동 감지에 맡기는 것이 올바른 방법.
 
 ---
 
-## Hardware Guide
+## 하드웨어 가이드
 
 ### Dense vs MoE
 
-At 4-bit quantization in a local environment:
+로컬 환경에서 4-bit 양자화 기준:
 
 | | Dense | MoE |
 |---|---|---|
-| **Speed** | slow (full-parameter inference) | fast (only active parameters) |
-| **Memory efficiency** | low | high |
+| **속도** | 느림 (전체 파라미터 추론) | 빠름 (활성 파라미터만 추론) |
+| **메모리 효율** | 낮음 | 높음 |
 | **Qwen3.6-27B-6bit** | ✅ Dense 27B (~23GB, 36%) | - |
 | **SuperGemma4-26B** | - | ✅ MoE 26B (~13GB, 25%) |
 
-Qwen3.6-27B is a **dense 27B architecture** (not MoE). All 27B parameters participate in inference, so memory usage is high, but quality is stable for a single model.
+Qwen3.6-27B는 **Dense 27B 아키텍처** (MoE 아님). 전체 27B 파라미터가 추론에 참여하므로 메모리 소비가 크지만, 단일 모델로서 품질이 안정적입니다.
 
-### Recommendations by Apple Silicon memory
+### Apple Silicon 메모리별 추천
 
-| Memory | Recommended model | Memory usage | Expected speed |
+| 메모리 | 추천 모델 | 메모리 사용 | 예상 속도 |
 |------:|---------|--------:|--------:|
-| **24GB** | SuperGemma4-26B (light) | ~13GB | ~46 tok/s |
+| **24GB** | SuperGemma4-26B (경량) | ~13GB | ~46 tok/s |
 | **32GB** | Qwen3.6-27B-6bit | ~23GB | ~12 tok/s |
-| **64GB** | **Qwen3.8-27B-8bit** — multimodal + Thinking + tool calling | peak ~34GB | ~25 tok/s (MTP ON) |
-| **128GB** | Large MoE like Qwen3-Coder-Next 80B-A3B | - | - |
+| **64GB** | **Qwen3.8-27B-8bit** — 멀티모달+Thinking+tool calling | 피크 ~34GB | ~25 tok/s (MTP ON) |
+| **128GB** | Qwen3-Coder-Next 80B-A3B 등 대형 MoE | - | - |
 
-### Recommendations by use case
+### 용도별 추천
 
-| Use case | Recommended model | Reason |
+| 용도 | 추천 모델 | 이유 |
 |------|---------|------|
-| Multimodal + Korean + coding | **Qwen3.8-27B-8bit** | image+text, Thinking, tool calling |
-| Agents (dsh dashboard) | **Qwen3.8-27B-8bit** | tool calling verified end-to-end |
-| Uncensored + strong tool calls | **SuperGemma4 26B** | fully uncensored, 128K, 13GB |
-| Long context | **Qwen3.8-27B 1M** | 2M characters via YaRN (not yet measured on 3.8) |
-| Coding agents (128GB+) | Qwen3-Coder-Next 80B-A3B | strongest on SWE-bench |
+| 멀티모달 + 한국어 + 코딩 | **Qwen3.8-27B-8bit** | 이미지+텍스트, Thinking, tool calling |
+| 에이전트 (dsh 대시보드) | **Qwen3.8-27B-8bit** | tool calling 실측 검증 완료 |
+| 무검열 + 툴콜 강화 | **SuperGemma4 26B** | 완전 무검열, 128K, 13GB |
+| 긴 컨텍스트 | **Qwen3.8-27B 1M** | YaRN으로 200만 글자 (3.8 실측 미완) |
+| 코딩 에이전트 (128GB+) | Qwen3-Coder-Next 80B-A3B | SWE-bench 최강 |
 
 ---
 
-## Benchmark Comparison
+## 벤치마크 비교
 
-| Benchmark | Qwen3.6-27B-6bit | SuperGemma4¹ | GPT-5 mini | Claude Sonnet 4.5 |
+| 벤치마크 | Qwen3.6-27B-6bit | SuperGemma4¹ | GPT-5 mini | Claude Sonnet 4.5 |
 |---------|:----------------:|:------------:|:---------:|:-----------------:|
 | MMLU-Pro | **86.2** | 82.6 | 83.7 | 80.8 |
 | SWE-bench (Verified) | **77.2** | - | 72.0 | 62.0 |
-| LiveCodeBench v6 | not measured | 77.1 | 80.5 | 82.7 |
-| BFCL-V4 (tools) | not measured | tool calls 2x↑² | 55.5 | 54.8 |
+| LiveCodeBench v6 | 미측정 | 77.1 | 80.5 | 82.7 |
+| BFCL-V4 (도구) | 미측정 | 툴콜 2배↑² | 55.5 | 54.8 |
 | GPQA Diamond | **87.8** | 82.3 | - | - |
-| Generation speed (MLX) | ~12 tok/s³ | ~46 tok/s | - | - |
+| 생성 속도 (MLX) | ~12 tok/s³ | ~46 tok/s | - | - |
 
-> ¹ Based on official Gemma 4 26B-it benchmarks. ² Self-reported, not independently verified. ³ Measured on M5 Pro 64GB (2026-08-02; MTP was inactive at the time — see the MTP section). The current default, Qwen3.8-27B-8bit, measures ~25 tok/s with MTP ON.
+> ¹ Gemma 4 26B-it 공식 벤치마크 기준. ² 자체 측정, 독립 검증 미완료. ³ M5 Pro 64GB 실측 (2026-08-02; 당시 MTP는 무동작 상태 — MTP 섹션 참고). 현재 기본인 Qwen3.8-27B-8bit는 MTP ON에서 실측 ~25 tok/s.
 
-### Community benchmark sharing (whatcani.run)
+### 커뮤니티 벤치마크 공유 (whatcani.run)
 
-[whatcani.run](https://www.whatcani.run/) is a platform for sharing real-world user-measured LLM benchmarks. MLX/llama.cpp runtimes are officially supported.
+[whatcani.run](https://www.whatcani.run/)은 실사용자 실측 LLM 벤치마크 공유 플랫폼. MLX/llama.cpp 런타임 공식 지원.
 
 ```bash
 bunx whatcanirun run \
@@ -1089,12 +1081,12 @@ bunx whatcanirun run \
 
 ---
 
-## Convenience Aliases (optional)
+## 편의 Alias (선택)
 
-Add to `~/.zshrc` to run from anywhere:
+`~/.zshrc`에 추가하면 어디서든 실행 가능:
 
 ```bash
-# local-llm aliases
+# local-llm alias
 alias llm-chat='/path/to/local-llm/llm-chat.sh'
 alias llm-server='/path/to/local-llm/llm-server.sh'
 alias llm-gemma='/path/to/local-llm/llm-server.sh supergemma4'
@@ -1103,55 +1095,55 @@ alias llm-gemma='/path/to/local-llm/llm-server.sh supergemma4'
 ```bash
 source ~/.zshrc
 
-llm-chat 1m              # Qwen3.6-27B 1M chat
-llm-server 1m            # Qwen3.6-27B API server
-llm-gemma                # SuperGemma4 API server
+llm-chat 1m              # Qwen3.6-27B 1M 채팅
+llm-server 1m            # Qwen3.6-27B API 서버
+llm-gemma                # SuperGemma4 API 서버
 ```
 
 ---
 
-## Memory Management
+## 메모리 관리
 
-| State | Memory usage |
+| 상태 | 메모리 사용 |
 |------|--------:|
-| Not running | ~21GB (system) |
-| Qwen3.8-27B running | process peak ~34GB |
-| Qwen3.6-27B running | ~44GB (system total) |
-| SuperGemma4 running | ~36GB (system total) |
-| After Ctrl+C | ~21GB (**released immediately**; dsh dashboard shuts down too) |
+| 미실행 | ~21GB (시스템) |
+| Qwen3.8-27B 실행 중 | 프로세스 피크 ~34GB |
+| Qwen3.6-27B 실행 중 | ~44GB (시스템 전체) |
+| SuperGemma4 실행 중 | ~36GB (시스템 전체) |
+| Ctrl+C 종료 후 | ~21GB (**즉시 해제**, dsh 대시보드도 함께 종료) |
 
-- Apple Silicon Unified Memory — quitting with Ctrl+C returns the model memory immediately
-- When switching models: always quit with Ctrl+C, then relaunch
+- Apple Silicon Unified Memory — Ctrl+C로 종료하면 모델 메모리 즉시 반환
+- 두 모델 전환 시: 반드시 Ctrl+C로 종료 후 재시작
 
 ```bash
-# Check the process
+# 프로세스 확인
 ps aux | grep llm-api-server | grep -v grep
 
-# Force kill
+# 강제 종료
 kill $(pgrep -f llm-api-server)
 
-# Check system memory
+# 시스템 메모리 확인
 top -l 1 -s 0 | grep PhysMem
 ```
 
 ---
 
-## llmfit — Hardware-Based Model Recommendation Tool
+## llmfit — 하드웨어 기반 모델 추천 도구
 
-A tool that automatically recommends LLMs that fit your hardware.
+내 하드웨어에 맞는 LLM을 자동 추천해주는 도구.
 
 ```bash
 brew install llmfit
 
-llmfit system                                    # check system specs
-llmfit fit                                       # recommend all compatible models
-llmfit search qwen3.6                            # search for a specific model
-llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # compare two models
+llmfit system                                    # 시스템 사양 확인
+llmfit fit                                       # 호환 모델 전체 추천
+llmfit search qwen3.6                            # 특정 모델 검색
+llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # 두 모델 비교
 ```
 
-### M5 Pro 64GB recommendations (as of 2026-03-22)
+### M5 Pro 64GB 추천 결과 (2026-03-22 기준)
 
-| Status | Model | Score | tok/s | Memory% |
+| 상태 | 모델 | Score | tok/s | 메모리% |
 |:---:|------|:---:|------:|------:|
 | Good | Qwen3-Coder-Next 80B-A3B | 99 | 105 | 64% |
 | Perfect | GPT-OSS 20B | 91 | 64 | 17% |
@@ -1159,56 +1151,56 @@ llmfit diff mlx-community/Qwen3.6-27B-6bit mlx-community/Qwen3.6-27B-4bit  # com
 
 ---
 
-## Tests
+## 테스트
 
 ```bash
-# Full test suite (126 tests, mocked model — no GPU required)
+# 전체 테스트 (128개, mock 모델 — GPU 불필요)
 .venv/bin/python -m pytest tests/ -v
 ```
 
-| Category | Test | What it verifies |
+| 카테고리 | 테스트 | 검증 내용 |
 |---------|-------|---------|
-| Models | list_models | GET /v1/models response format |
-| Chat | basic_request | OpenAI-compatible response (id, choices, usage) |
-| Chat | enable_thinking | mlx-vlm Thinking ON/OFF handling |
-| Chat | preserve_thinking | thinking block include/strip behavior |
+| Models | list_models | GET /v1/models 응답 형식 |
+| Chat | basic_request | OpenAI 호환 응답 (id, choices, usage) |
+| Chat | enable_thinking | mlx-vlm Thinking ON/OFF 처리 |
+| Chat | preserve_thinking | thinking 블록 포함/제거 동작 |
 | Chat | custom_parameters | temperature, top_p, max_tokens |
-| Chat | max_completion_tokens | new OpenAI parameter compatibility |
-| Chat | image_input | multimodal image input handling |
-| Tools | parse_tool_calls | XML tool call → OpenAI format conversion, type casting, multiple calls |
-| Tools | strip_thinking + tool | response preserved when a tool call comes immediately with thinking ON |
-| Tools | developer_role | developer → system role mapping |
-| Tools | trim_retry | retry path for the mlx-vlm cache trim bug |
-| Stream | stream_format | SSE content-type, chunk format |
+| Chat | max_completion_tokens | OpenAI 신규 파라미터 호환 |
+| Chat | image_input | 멀티모달 이미지 입력 처리 |
+| Tools | parse_tool_calls | XML tool call → OpenAI 포맷 변환, 타입 캐스팅, 다중 호출 |
+| Tools | strip_thinking + tool | thinking ON에서 즉시 tool call 시 응답 유지 |
+| Tools | developer_role | developer → system role 매핑 |
+| Tools | trim_retry | mlx-vlm 캐시 trim 버그 재시도 경로 |
+| Stream | stream_format | SSE content-type, chunk 형식 |
 | Stream | stream_chunks | role → content → finish_reason → [DONE] |
-| RateLimit | queue_full | 429 response when the queue is full |
-| Logging | log_file_created | JSONL log file creation + field validation |
-| Decision | parse_decision_request | System One request validation (noul / choice / score, 422 cases) |
-| Decision | option_probs | first-token logprobs → renormalized option probabilities, coverage, temperature |
-| Decision | systemone (llm / kev / off) | answers per type, one prefill per question in float32, Kev forwarding, 404/429/502 |
+| RateLimit | queue_full | 큐 초과 시 429 응답 |
+| Logging | log_file_created | JSONL 로그 파일 생성 + 필드 검증 |
+| Decision | parse_decision_request | System One 요청 검증 (noul / choice / score, 422 경우) |
+| Decision | option_probs | 첫 토큰 logprobs → 선택지 확률 재정규화, coverage, 온도 |
+| Decision | systemone (llm / kev / off) | 타입별 답, 질문당 프리필 1회·float32, Kev 전달, 404/429/502 |
 
 ---
 
-## Reference Links
+## 참고 링크
 
 - [MLX-VLM GitHub](https://github.com/Blaizzy/mlx-vlm)
 - [Qwen3.8-27B-8bit (MLX Community)](https://huggingface.co/mlx-community/Qwen3.8-27B-8bit)
-- [Qwen3.8 official HuggingFace](https://huggingface.co/Qwen/Qwen3.8-27B)
+- [Qwen3.8 공식 HuggingFace](https://huggingface.co/Qwen/Qwen3.8-27B)
 - [dsh (deepseek-harness) GitHub](https://github.com/deepseek-ai/deepseek-harness)
 - [Qwen3.6-27B-6bit (MLX Community)](https://huggingface.co/mlx-community/Qwen3.6-27B-6bit)
-- [Qwen3.6 official HuggingFace](https://huggingface.co/Qwen/Qwen3.6-27B)
+- [Qwen3.6 공식 HuggingFace](https://huggingface.co/Qwen/Qwen3.6-27B)
 - [SuperGemma4 26B uncensored MLX 4bit (v2)](https://huggingface.co/Jiunsong/supergemma4-26b-uncensored-mlx-4bit-v2)
 - [SuperGemma4 26B abliterated multimodal MLX 4bit](https://huggingface.co/Jiunsong/supergemma4-26b-abliterated-multimodal-mlx-4bit)
 - [SuperGemma4 26B uncensored GGUF v2](https://huggingface.co/Jiunsong/supergemma4-26b-uncensored-gguf-v2)
 - [SuperGemma4 26B uncensored GGUF v2 (Ollama)](https://ollama.com/0xIbra/supergemma4-26b-uncensored-gguf-v2)
 - [SuperGemma4 31B abliterated MLX 4bit](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-mlx-4bit)
 - [SuperGemma4 31B abliterated GGUF](https://huggingface.co/Jiunsong/SuperGemma4-31b-abliterated-GGUF)
-- [Gemma 4 official blog (Google)](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/)
+- [Gemma 4 공식 블로그 (Google)](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/)
 - [TurboQuant (Google Research)](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/)
 - [Gemma 4 on Ollama](https://ollama.com/library/gemma4)
-- [Apple MLX + M5 research](https://machinelearning.apple.com/research/exploring-llms-mlx-m5)
-- [M5 Pro/Max local LLM guide](https://modelfit.io/blog/m5-pro-max-local-llm-2026/)
-- [whatcani.run — real-world Apple Silicon LLM benchmarks](https://www.whatcani.run/)
+- [Apple MLX + M5 리서치](https://machinelearning.apple.com/research/exploring-llms-mlx-m5)
+- [M5 Pro/Max 로컬 LLM 가이드](https://modelfit.io/blog/m5-pro-max-local-llm-2026/)
+- [whatcani.run — Apple Silicon 실측 LLM 벤치마크](https://www.whatcani.run/)
 
 ---
 
